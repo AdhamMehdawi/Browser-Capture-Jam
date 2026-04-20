@@ -18,11 +18,35 @@
         </div>
         <span class="logo-text">SnapCap</span>
       </div>
-      <div class="status-badge" id="statusBadge">
-        <span class="status-dot"></span>
-        <span id="statusText">Ready</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <div class="status-badge" id="statusBadge">
+          <span class="status-dot"></span>
+          <span id="statusText">Ready</span>
+        </div>
+        <button class="btn-icon" id="btnSettings" title="Settings">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+        </button>
       </div>
     </header>
+
+    <!-- Settings panel -->
+    <div class="settings-panel hidden" id="settingsPanel">
+      <div class="settings-body">
+        <div class="field-group">
+          <label class="field-label">Dashboard API Key</label>
+          <input type="password" class="field-input" id="apiKeyInput" placeholder="sc_••••••••••••" />
+          <span class="field-hint">From SnapCap Dashboard &rarr; Settings</span>
+        </div>
+        <div class="field-group">
+          <label class="field-label">Server URL</label>
+          <input type="text" class="field-input" id="serverUrlInput" placeholder="https://your-app.replit.app" />
+        </div>
+        <div class="settings-footer">
+          <span class="sync-status" id="settingsSyncStatus"></span>
+          <button class="btn-primary btn-sm-inline" id="btnSaveSettings">Save</button>
+        </div>
+      </div>
+    </div>
 
     <div class="main" id="mainIdle">
       <div class="record-area">
@@ -89,7 +113,7 @@
       </div>
       <button class="btn-stop" id="btnStop">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
-        Stop & Save
+        Stop &amp; Save
       </button>
     </div>
 
@@ -113,7 +137,12 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           Download
         </button>
+        <button class="btn-secondary" id="btnSyncToDashboard">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Sync to Dashboard
+        </button>
       </div>
+      <span class="sync-status" id="syncStatus"></span>
       <button class="btn-new" id="btnNew">Start new recording</button>
     </div>
 

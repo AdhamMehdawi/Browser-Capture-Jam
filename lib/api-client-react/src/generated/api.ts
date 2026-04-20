@@ -5,18 +5,35 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
+  MutationFunction,
   QueryFunction,
   QueryKey,
+  UseMutationOptions,
+  UseMutationResult,
   UseQueryOptions,
   UseQueryResult,
 } from "@tanstack/react-query";
 
-import type { HealthStatus } from "./api.schemas";
+import type {
+  ApiKeyResponse,
+  CreateRecordingBody,
+  HealthStatus,
+  ListRecordingsParams,
+  Recording,
+  RecordingListResponse,
+  RecordingStats,
+  RecordingWithEvents,
+  RequestUploadUrlBody,
+  RequestUploadUrlResponse,
+  ShareLinkResponse,
+  UpdateRecordingBody,
+  UserProfile,
+} from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
-import type { ErrorType } from "../custom-fetch";
+import type { ErrorType, BodyType } from "../custom-fetch";
 
 type AwaitedInput<T> = PromiseLike<T> | T;
 
@@ -25,7 +42,6 @@ type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
 
 /**
- * Returns server health status
  * @summary Health check
  */
 export const getHealthCheckUrl = () => {
@@ -99,3 +115,1002 @@ export function useHealthCheck<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary List recordings for the current user
+ */
+export const getListRecordingsUrl = (params?: ListRecordingsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/recordings?${stringifiedParams}`
+    : `/api/recordings`;
+};
+
+export const listRecordings = async (
+  params?: ListRecordingsParams,
+  options?: RequestInit,
+): Promise<RecordingListResponse> => {
+  return customFetch<RecordingListResponse>(getListRecordingsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListRecordingsQueryKey = (params?: ListRecordingsParams) => {
+  return [`/api/recordings`, ...(params ? [params] : [])] as const;
+};
+
+export const getListRecordingsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listRecordings>>,
+  TError = ErrorType<void>,
+>(
+  params?: ListRecordingsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listRecordings>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListRecordingsQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listRecordings>>> = ({
+    signal,
+  }) => listRecordings(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listRecordings>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListRecordingsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listRecordings>>
+>;
+export type ListRecordingsQueryError = ErrorType<void>;
+
+/**
+ * @summary List recordings for the current user
+ */
+
+export function useListRecordings<
+  TData = Awaited<ReturnType<typeof listRecordings>>,
+  TError = ErrorType<void>,
+>(
+  params?: ListRecordingsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listRecordings>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListRecordingsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create a new recording
+ */
+export const getCreateRecordingUrl = () => {
+  return `/api/recordings`;
+};
+
+export const createRecording = async (
+  createRecordingBody: CreateRecordingBody,
+  options?: RequestInit,
+): Promise<Recording> => {
+  return customFetch<Recording>(getCreateRecordingUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createRecordingBody),
+  });
+};
+
+export const getCreateRecordingMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createRecording>>,
+    TError,
+    { data: BodyType<CreateRecordingBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createRecording>>,
+  TError,
+  { data: BodyType<CreateRecordingBody> },
+  TContext
+> => {
+  const mutationKey = ["createRecording"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createRecording>>,
+    { data: BodyType<CreateRecordingBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createRecording(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateRecordingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createRecording>>
+>;
+export type CreateRecordingMutationBody = BodyType<CreateRecordingBody>;
+export type CreateRecordingMutationError = ErrorType<void>;
+
+/**
+ * @summary Create a new recording
+ */
+export const useCreateRecording = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createRecording>>,
+    TError,
+    { data: BodyType<CreateRecordingBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createRecording>>,
+  TError,
+  { data: BodyType<CreateRecordingBody> },
+  TContext
+> => {
+  return useMutation(getCreateRecordingMutationOptions(options));
+};
+
+/**
+ * @summary Get dashboard stats for current user
+ */
+export const getGetRecordingStatsUrl = () => {
+  return `/api/recordings/stats`;
+};
+
+export const getRecordingStats = async (
+  options?: RequestInit,
+): Promise<RecordingStats> => {
+  return customFetch<RecordingStats>(getGetRecordingStatsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetRecordingStatsQueryKey = () => {
+  return [`/api/recordings/stats`] as const;
+};
+
+export const getGetRecordingStatsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getRecordingStats>>,
+  TError = ErrorType<void>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getRecordingStats>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetRecordingStatsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getRecordingStats>>
+  > = ({ signal }) => getRecordingStats({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getRecordingStats>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetRecordingStatsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getRecordingStats>>
+>;
+export type GetRecordingStatsQueryError = ErrorType<void>;
+
+/**
+ * @summary Get dashboard stats for current user
+ */
+
+export function useGetRecordingStats<
+  TData = Awaited<ReturnType<typeof getRecordingStats>>,
+  TError = ErrorType<void>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getRecordingStats>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetRecordingStatsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Get a recording by ID
+ */
+export const getGetRecordingUrl = (id: string) => {
+  return `/api/recordings/${id}`;
+};
+
+export const getRecording = async (
+  id: string,
+  options?: RequestInit,
+): Promise<RecordingWithEvents> => {
+  return customFetch<RecordingWithEvents>(getGetRecordingUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetRecordingQueryKey = (id: string) => {
+  return [`/api/recordings/${id}`] as const;
+};
+
+export const getGetRecordingQueryOptions = <
+  TData = Awaited<ReturnType<typeof getRecording>>,
+  TError = ErrorType<void>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getRecording>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetRecordingQueryKey(id);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getRecording>>> = ({
+    signal,
+  }) => getRecording(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getRecording>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetRecordingQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getRecording>>
+>;
+export type GetRecordingQueryError = ErrorType<void>;
+
+/**
+ * @summary Get a recording by ID
+ */
+
+export function useGetRecording<
+  TData = Awaited<ReturnType<typeof getRecording>>,
+  TError = ErrorType<void>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getRecording>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetRecordingQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Update recording title or tags
+ */
+export const getUpdateRecordingUrl = (id: string) => {
+  return `/api/recordings/${id}`;
+};
+
+export const updateRecording = async (
+  id: string,
+  updateRecordingBody: UpdateRecordingBody,
+  options?: RequestInit,
+): Promise<Recording> => {
+  return customFetch<Recording>(getUpdateRecordingUrl(id), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateRecordingBody),
+  });
+};
+
+export const getUpdateRecordingMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateRecording>>,
+    TError,
+    { id: string; data: BodyType<UpdateRecordingBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateRecording>>,
+  TError,
+  { id: string; data: BodyType<UpdateRecordingBody> },
+  TContext
+> => {
+  const mutationKey = ["updateRecording"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateRecording>>,
+    { id: string; data: BodyType<UpdateRecordingBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateRecording(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateRecordingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateRecording>>
+>;
+export type UpdateRecordingMutationBody = BodyType<UpdateRecordingBody>;
+export type UpdateRecordingMutationError = ErrorType<void>;
+
+/**
+ * @summary Update recording title or tags
+ */
+export const useUpdateRecording = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateRecording>>,
+    TError,
+    { id: string; data: BodyType<UpdateRecordingBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateRecording>>,
+  TError,
+  { id: string; data: BodyType<UpdateRecordingBody> },
+  TContext
+> => {
+  return useMutation(getUpdateRecordingMutationOptions(options));
+};
+
+/**
+ * @summary Delete a recording
+ */
+export const getDeleteRecordingUrl = (id: string) => {
+  return `/api/recordings/${id}`;
+};
+
+export const deleteRecording = async (
+  id: string,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getDeleteRecordingUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteRecordingMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteRecording>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteRecording>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["deleteRecording"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteRecording>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return deleteRecording(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteRecordingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteRecording>>
+>;
+
+export type DeleteRecordingMutationError = ErrorType<void>;
+
+/**
+ * @summary Delete a recording
+ */
+export const useDeleteRecording = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteRecording>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteRecording>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getDeleteRecordingMutationOptions(options));
+};
+
+/**
+ * @summary Create or regenerate a public share link
+ */
+export const getCreateShareLinkUrl = (id: string) => {
+  return `/api/recordings/${id}/share`;
+};
+
+export const createShareLink = async (
+  id: string,
+  options?: RequestInit,
+): Promise<ShareLinkResponse> => {
+  return customFetch<ShareLinkResponse>(getCreateShareLinkUrl(id), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getCreateShareLinkMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createShareLink>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createShareLink>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["createShareLink"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createShareLink>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return createShareLink(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateShareLinkMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createShareLink>>
+>;
+
+export type CreateShareLinkMutationError = ErrorType<void>;
+
+/**
+ * @summary Create or regenerate a public share link
+ */
+export const useCreateShareLink = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createShareLink>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createShareLink>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getCreateShareLinkMutationOptions(options));
+};
+
+/**
+ * @summary Remove public sharing from a recording
+ */
+export const getDeleteShareLinkUrl = (id: string) => {
+  return `/api/recordings/${id}/share`;
+};
+
+export const deleteShareLink = async (
+  id: string,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getDeleteShareLinkUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteShareLinkMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteShareLink>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteShareLink>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["deleteShareLink"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteShareLink>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return deleteShareLink(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteShareLinkMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteShareLink>>
+>;
+
+export type DeleteShareLinkMutationError = ErrorType<void>;
+
+/**
+ * @summary Remove public sharing from a recording
+ */
+export const useDeleteShareLink = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteShareLink>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteShareLink>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getDeleteShareLinkMutationOptions(options));
+};
+
+/**
+ * @summary Get a publicly shared recording by token
+ */
+export const getGetSharedRecordingUrl = (token: string) => {
+  return `/api/share/${token}`;
+};
+
+export const getSharedRecording = async (
+  token: string,
+  options?: RequestInit,
+): Promise<RecordingWithEvents> => {
+  return customFetch<RecordingWithEvents>(getGetSharedRecordingUrl(token), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetSharedRecordingQueryKey = (token: string) => {
+  return [`/api/share/${token}`] as const;
+};
+
+export const getGetSharedRecordingQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSharedRecording>>,
+  TError = ErrorType<void>,
+>(
+  token: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSharedRecording>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetSharedRecordingQueryKey(token);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getSharedRecording>>
+  > = ({ signal }) => getSharedRecording(token, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!token,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getSharedRecording>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetSharedRecordingQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSharedRecording>>
+>;
+export type GetSharedRecordingQueryError = ErrorType<void>;
+
+/**
+ * @summary Get a publicly shared recording by token
+ */
+
+export function useGetSharedRecording<
+  TData = Awaited<ReturnType<typeof getSharedRecording>>,
+  TError = ErrorType<void>,
+>(
+  token: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSharedRecording>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetSharedRecordingQueryOptions(token, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Get current user profile and stats
+ */
+export const getGetMeUrl = () => {
+  return `/api/me`;
+};
+
+export const getMe = async (options?: RequestInit): Promise<UserProfile> => {
+  return customFetch<UserProfile>(getGetMeUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetMeQueryKey = () => {
+  return [`/api/me`] as const;
+};
+
+export const getGetMeQueryOptions = <
+  TData = Awaited<ReturnType<typeof getMe>>,
+  TError = ErrorType<void>,
+>(options?: {
+  query?: UseQueryOptions<Awaited<ReturnType<typeof getMe>>, TError, TData>;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetMeQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getMe>>> = ({
+    signal,
+  }) => getMe({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getMe>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetMeQueryResult = NonNullable<Awaited<ReturnType<typeof getMe>>>;
+export type GetMeQueryError = ErrorType<void>;
+
+/**
+ * @summary Get current user profile and stats
+ */
+
+export function useGetMe<
+  TData = Awaited<ReturnType<typeof getMe>>,
+  TError = ErrorType<void>,
+>(options?: {
+  query?: UseQueryOptions<Awaited<ReturnType<typeof getMe>>, TError, TData>;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetMeQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Generate a new API key for extension sync
+ */
+export const getGenerateApiKeyUrl = () => {
+  return `/api/me/api-key`;
+};
+
+export const generateApiKey = async (
+  options?: RequestInit,
+): Promise<ApiKeyResponse> => {
+  return customFetch<ApiKeyResponse>(getGenerateApiKeyUrl(), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getGenerateApiKeyMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateApiKey>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof generateApiKey>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = ["generateApiKey"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof generateApiKey>>,
+    void
+  > = () => {
+    return generateApiKey(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type GenerateApiKeyMutationResult = NonNullable<
+  Awaited<ReturnType<typeof generateApiKey>>
+>;
+
+export type GenerateApiKeyMutationError = ErrorType<void>;
+
+/**
+ * @summary Generate a new API key for extension sync
+ */
+export const useGenerateApiKey = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateApiKey>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof generateApiKey>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getGenerateApiKeyMutationOptions(options));
+};
+
+/**
+ * @summary Request a presigned upload URL for object storage
+ */
+export const getRequestUploadUrlUrl = () => {
+  return `/api/storage/uploads/request-url`;
+};
+
+export const requestUploadUrl = async (
+  requestUploadUrlBody: RequestUploadUrlBody,
+  options?: RequestInit,
+): Promise<RequestUploadUrlResponse> => {
+  return customFetch<RequestUploadUrlResponse>(getRequestUploadUrlUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(requestUploadUrlBody),
+  });
+};
+
+export const getRequestUploadUrlMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof requestUploadUrl>>,
+    TError,
+    { data: BodyType<RequestUploadUrlBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof requestUploadUrl>>,
+  TError,
+  { data: BodyType<RequestUploadUrlBody> },
+  TContext
+> => {
+  const mutationKey = ["requestUploadUrl"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof requestUploadUrl>>,
+    { data: BodyType<RequestUploadUrlBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return requestUploadUrl(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RequestUploadUrlMutationResult = NonNullable<
+  Awaited<ReturnType<typeof requestUploadUrl>>
+>;
+export type RequestUploadUrlMutationBody = BodyType<RequestUploadUrlBody>;
+export type RequestUploadUrlMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Request a presigned upload URL for object storage
+ */
+export const useRequestUploadUrl = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof requestUploadUrl>>,
+    TError,
+    { data: BodyType<RequestUploadUrlBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof requestUploadUrl>>,
+  TError,
+  { data: BodyType<RequestUploadUrlBody> },
+  TContext
+> => {
+  return useMutation(getRequestUploadUrlMutationOptions(options));
+};

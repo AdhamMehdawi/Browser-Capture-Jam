@@ -10,13 +10,20 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: recordings
+    description: Recording management
+  - name: share
+    description: Public share access
+  - name: storage
+    description: Object storage
+  - name: user
+    description: User profile
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +31,246 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /recordings:
+    get:
+      operationId: listRecordings
+      tags: [recordings]
+      summary: List recordings for the current user
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: tag
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of recordings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecordingListResponse"
+        "401":
+          description: Unauthorized
+    post:
+      operationId: createRecording
+      tags: [recordings]
+      summary: Create a new recording
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRecordingBody"
+      responses:
+        "201":
+          description: Recording created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Recording"
+        "401":
+          description: Unauthorized
+
+  /recordings/stats:
+    get:
+      operationId: getRecordingStats
+      tags: [recordings]
+      summary: Get dashboard stats for current user
+      responses:
+        "200":
+          description: User stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecordingStats"
+        "401":
+          description: Unauthorized
+
+  /recordings/{id}:
+    get:
+      operationId: getRecording
+      tags: [recordings]
+      summary: Get a recording by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Recording
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecordingWithEvents"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateRecording
+      tags: [recordings]
+      summary: Update recording title or tags
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateRecordingBody"
+      responses:
+        "200":
+          description: Updated recording
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Recording"
+        "401":
+          description: Unauthorized
+        "404":
+          description: Not found
+    delete:
+      operationId: deleteRecording
+      tags: [recordings]
+      summary: Delete a recording
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+        "401":
+          description: Unauthorized
+        "404":
+          description: Not found
+
+  /recordings/{id}/share:
+    post:
+      operationId: createShareLink
+      tags: [recordings]
+      summary: Create or regenerate a public share link
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Share link created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShareLinkResponse"
+        "401":
+          description: Unauthorized
+    delete:
+      operationId: deleteShareLink
+      tags: [recordings]
+      summary: Remove public sharing from a recording
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Share removed
+        "401":
+          description: Unauthorized
+
+  /share/{token}:
+    get:
+      operationId: getSharedRecording
+      tags: [share]
+      summary: Get a publicly shared recording by token
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Shared recording
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecordingWithEvents"
+        "404":
+          description: Not found or sharing disabled
+
+  /me:
+    get:
+      operationId: getMe
+      tags: [user]
+      summary: Get current user profile and stats
+      responses:
+        "200":
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "401":
+          description: Unauthorized
+
+  /me/api-key:
+    post:
+      operationId: generateApiKey
+      tags: [user]
+      summary: Generate a new API key for extension sync
+      responses:
+        "200":
+          description: API key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiKeyResponse"
+        "401":
+          description: Unauthorized
+
+  /storage/uploads/request-url:
+    post:
+      operationId: requestUploadUrl
+      tags: [storage]
+      summary: Request a presigned upload URL for object storage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestUploadUrlBody"
+      responses:
+        "200":
+          description: Upload URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RequestUploadUrlResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +281,299 @@ components:
       required:
         - status
 
+    Recording:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        title:
+          type: string
+        duration:
+          type: integer
+          description: Duration in milliseconds
+        createdAt:
+          type: string
+          format: date-time
+        pageUrl:
+          type: string
+          nullable: true
+        pageTitle:
+          type: string
+          nullable: true
+        networkLogsCount:
+          type: integer
+        errorCount:
+          type: integer
+        consoleCount:
+          type: integer
+        clickCount:
+          type: integer
+        videoObjectPath:
+          type: string
+          nullable: true
+        shareToken:
+          type: string
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+        browserInfo:
+          type: object
+          nullable: true
+          additionalProperties: true
+      required:
+        - id
+        - userId
+        - title
+        - duration
+        - createdAt
+        - networkLogsCount
+        - errorCount
+        - consoleCount
+        - clickCount
+        - tags
+
+    NetworkLogEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [request, console, click, navigation, performance]
+        method:
+          type: string
+          nullable: true
+        url:
+          type: string
+          nullable: true
+        status:
+          type: integer
+          nullable: true
+        duration:
+          type: integer
+          nullable: true
+        requestBody:
+          type: string
+          nullable: true
+        requestHeaders:
+          type: object
+          nullable: true
+          additionalProperties: true
+        responseHeaders:
+          type: object
+          nullable: true
+          additionalProperties: true
+        error:
+          type: string
+          nullable: true
+        level:
+          type: string
+          nullable: true
+        message:
+          type: string
+          nullable: true
+        timestamp:
+          type: integer
+        resourceType:
+          type: string
+          nullable: true
+      required:
+        - id
+        - type
+        - timestamp
+
+    RecordingWithEvents:
+      allOf:
+        - $ref: "#/components/schemas/Recording"
+        - type: object
+          properties:
+            events:
+              type: array
+              items:
+                $ref: "#/components/schemas/NetworkLogEntry"
+          required:
+            - events
+
+    RecordingListResponse:
+      type: object
+      properties:
+        recordings:
+          type: array
+          items:
+            $ref: "#/components/schemas/Recording"
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+      required:
+        - recordings
+        - total
+        - page
+        - limit
+
+    CreateRecordingBody:
+      type: object
+      properties:
+        title:
+          type: string
+        duration:
+          type: integer
+        pageUrl:
+          type: string
+          nullable: true
+        pageTitle:
+          type: string
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/NetworkLogEntry"
+        videoObjectPath:
+          type: string
+          nullable: true
+        browserInfo:
+          type: object
+          nullable: true
+          additionalProperties: true
+      required:
+        - title
+        - duration
+        - events
+
+    UpdateRecordingBody:
+      type: object
+      properties:
+        title:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+
+    RecordingStats:
+      type: object
+      properties:
+        totalRecordings:
+          type: integer
+        totalDuration:
+          type: integer
+        totalRequests:
+          type: integer
+        totalErrors:
+          type: integer
+        avgErrorRate:
+          type: number
+        recentActivity:
+          type: array
+          items:
+            $ref: "#/components/schemas/Recording"
+        topErrorPages:
+          type: array
+          items:
+            type: object
+            properties:
+              pageUrl:
+                type: string
+              errorCount:
+                type: integer
+            required:
+              - pageUrl
+              - errorCount
+        requestsByDay:
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+              count:
+                type: integer
+            required:
+              - date
+              - count
+      required:
+        - totalRecordings
+        - totalDuration
+        - totalRequests
+        - totalErrors
+        - avgErrorRate
+        - recentActivity
+        - topErrorPages
+        - requestsByDay
+
+    ShareLinkResponse:
+      type: object
+      properties:
+        shareToken:
+          type: string
+        shareUrl:
+          type: string
+      required:
+        - shareToken
+        - shareUrl
+
+    UserProfile:
+      type: object
+      properties:
+        userId:
+          type: string
+        email:
+          type: string
+          nullable: true
+        firstName:
+          type: string
+          nullable: true
+        lastName:
+          type: string
+          nullable: true
+        totalRecordings:
+          type: integer
+        apiKeyPreview:
+          type: string
+          nullable: true
+      required:
+        - userId
+        - totalRecordings
+
+    ApiKeyResponse:
+      type: object
+      properties:
+        apiKey:
+          type: string
+      required:
+        - apiKey
+
+    RequestUploadUrlBody:
+      type: object
+      properties:
+        name:
+          type: string
+        size:
+          type: integer
+        contentType:
+          type: string
+      required:
+        - name
+        - size
+        - contentType
+
+    RequestUploadUrlResponse:
+      type: object
+      properties:
+        uploadURL:
+          type: string
+        objectPath:
+          type: string
+      required:
+        - uploadURL
+        - objectPath

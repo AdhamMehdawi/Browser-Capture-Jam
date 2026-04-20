@@ -8,9 +8,322 @@
 import * as zod from "zod";
 
 /**
- * Returns server health status
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
   status: zod.string(),
+});
+
+/**
+ * @summary List recordings for the current user
+ */
+export const listRecordingsQueryPageDefault = 1;
+export const listRecordingsQueryLimitDefault = 20;
+
+export const ListRecordingsQueryParams = zod.object({
+  page: zod.coerce.number().default(listRecordingsQueryPageDefault),
+  limit: zod.coerce.number().default(listRecordingsQueryLimitDefault),
+  search: zod.coerce.string().optional(),
+  tag: zod.coerce.string().optional(),
+});
+
+export const ListRecordingsResponse = zod.object({
+  recordings: zod.array(
+    zod.object({
+      id: zod.string(),
+      userId: zod.string(),
+      title: zod.string(),
+      duration: zod.number().describe("Duration in milliseconds"),
+      createdAt: zod.coerce.date(),
+      pageUrl: zod.string().nullish(),
+      pageTitle: zod.string().nullish(),
+      networkLogsCount: zod.number(),
+      errorCount: zod.number(),
+      consoleCount: zod.number(),
+      clickCount: zod.number(),
+      videoObjectPath: zod.string().nullish(),
+      shareToken: zod.string().nullish(),
+      tags: zod.array(zod.string()),
+      browserInfo: zod.record(zod.string(), zod.unknown()).nullish(),
+    }),
+  ),
+  total: zod.number(),
+  page: zod.number(),
+  limit: zod.number(),
+});
+
+/**
+ * @summary Create a new recording
+ */
+export const CreateRecordingBody = zod.object({
+  title: zod.string(),
+  duration: zod.number(),
+  pageUrl: zod.string().nullish(),
+  pageTitle: zod.string().nullish(),
+  tags: zod.array(zod.string()).optional(),
+  events: zod.array(
+    zod.object({
+      id: zod.string(),
+      type: zod.enum([
+        "request",
+        "console",
+        "click",
+        "navigation",
+        "performance",
+      ]),
+      method: zod.string().nullish(),
+      url: zod.string().nullish(),
+      status: zod.number().nullish(),
+      duration: zod.number().nullish(),
+      requestBody: zod.string().nullish(),
+      requestHeaders: zod.record(zod.string(), zod.unknown()).nullish(),
+      responseHeaders: zod.record(zod.string(), zod.unknown()).nullish(),
+      error: zod.string().nullish(),
+      level: zod.string().nullish(),
+      message: zod.string().nullish(),
+      timestamp: zod.number(),
+      resourceType: zod.string().nullish(),
+    }),
+  ),
+  videoObjectPath: zod.string().nullish(),
+  browserInfo: zod.record(zod.string(), zod.unknown()).nullish(),
+});
+
+/**
+ * @summary Get dashboard stats for current user
+ */
+export const GetRecordingStatsResponse = zod.object({
+  totalRecordings: zod.number(),
+  totalDuration: zod.number(),
+  totalRequests: zod.number(),
+  totalErrors: zod.number(),
+  avgErrorRate: zod.number(),
+  recentActivity: zod.array(
+    zod.object({
+      id: zod.string(),
+      userId: zod.string(),
+      title: zod.string(),
+      duration: zod.number().describe("Duration in milliseconds"),
+      createdAt: zod.coerce.date(),
+      pageUrl: zod.string().nullish(),
+      pageTitle: zod.string().nullish(),
+      networkLogsCount: zod.number(),
+      errorCount: zod.number(),
+      consoleCount: zod.number(),
+      clickCount: zod.number(),
+      videoObjectPath: zod.string().nullish(),
+      shareToken: zod.string().nullish(),
+      tags: zod.array(zod.string()),
+      browserInfo: zod.record(zod.string(), zod.unknown()).nullish(),
+    }),
+  ),
+  topErrorPages: zod.array(
+    zod.object({
+      pageUrl: zod.string(),
+      errorCount: zod.number(),
+    }),
+  ),
+  requestsByDay: zod.array(
+    zod.object({
+      date: zod.string(),
+      count: zod.number(),
+    }),
+  ),
+});
+
+/**
+ * @summary Get a recording by ID
+ */
+export const GetRecordingParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetRecordingResponse = zod
+  .object({
+    id: zod.string(),
+    userId: zod.string(),
+    title: zod.string(),
+    duration: zod.number().describe("Duration in milliseconds"),
+    createdAt: zod.coerce.date(),
+    pageUrl: zod.string().nullish(),
+    pageTitle: zod.string().nullish(),
+    networkLogsCount: zod.number(),
+    errorCount: zod.number(),
+    consoleCount: zod.number(),
+    clickCount: zod.number(),
+    videoObjectPath: zod.string().nullish(),
+    shareToken: zod.string().nullish(),
+    tags: zod.array(zod.string()),
+    browserInfo: zod.record(zod.string(), zod.unknown()).nullish(),
+  })
+  .and(
+    zod.object({
+      events: zod.array(
+        zod.object({
+          id: zod.string(),
+          type: zod.enum([
+            "request",
+            "console",
+            "click",
+            "navigation",
+            "performance",
+          ]),
+          method: zod.string().nullish(),
+          url: zod.string().nullish(),
+          status: zod.number().nullish(),
+          duration: zod.number().nullish(),
+          requestBody: zod.string().nullish(),
+          requestHeaders: zod.record(zod.string(), zod.unknown()).nullish(),
+          responseHeaders: zod.record(zod.string(), zod.unknown()).nullish(),
+          error: zod.string().nullish(),
+          level: zod.string().nullish(),
+          message: zod.string().nullish(),
+          timestamp: zod.number(),
+          resourceType: zod.string().nullish(),
+        }),
+      ),
+    }),
+  );
+
+/**
+ * @summary Update recording title or tags
+ */
+export const UpdateRecordingParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdateRecordingBody = zod.object({
+  title: zod.string().optional(),
+  tags: zod.array(zod.string()).optional(),
+});
+
+export const UpdateRecordingResponse = zod.object({
+  id: zod.string(),
+  userId: zod.string(),
+  title: zod.string(),
+  duration: zod.number().describe("Duration in milliseconds"),
+  createdAt: zod.coerce.date(),
+  pageUrl: zod.string().nullish(),
+  pageTitle: zod.string().nullish(),
+  networkLogsCount: zod.number(),
+  errorCount: zod.number(),
+  consoleCount: zod.number(),
+  clickCount: zod.number(),
+  videoObjectPath: zod.string().nullish(),
+  shareToken: zod.string().nullish(),
+  tags: zod.array(zod.string()),
+  browserInfo: zod.record(zod.string(), zod.unknown()).nullish(),
+});
+
+/**
+ * @summary Delete a recording
+ */
+export const DeleteRecordingParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+/**
+ * @summary Create or regenerate a public share link
+ */
+export const CreateShareLinkParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const CreateShareLinkResponse = zod.object({
+  shareToken: zod.string(),
+  shareUrl: zod.string(),
+});
+
+/**
+ * @summary Remove public sharing from a recording
+ */
+export const DeleteShareLinkParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+/**
+ * @summary Get a publicly shared recording by token
+ */
+export const GetSharedRecordingParams = zod.object({
+  token: zod.coerce.string(),
+});
+
+export const GetSharedRecordingResponse = zod
+  .object({
+    id: zod.string(),
+    userId: zod.string(),
+    title: zod.string(),
+    duration: zod.number().describe("Duration in milliseconds"),
+    createdAt: zod.coerce.date(),
+    pageUrl: zod.string().nullish(),
+    pageTitle: zod.string().nullish(),
+    networkLogsCount: zod.number(),
+    errorCount: zod.number(),
+    consoleCount: zod.number(),
+    clickCount: zod.number(),
+    videoObjectPath: zod.string().nullish(),
+    shareToken: zod.string().nullish(),
+    tags: zod.array(zod.string()),
+    browserInfo: zod.record(zod.string(), zod.unknown()).nullish(),
+  })
+  .and(
+    zod.object({
+      events: zod.array(
+        zod.object({
+          id: zod.string(),
+          type: zod.enum([
+            "request",
+            "console",
+            "click",
+            "navigation",
+            "performance",
+          ]),
+          method: zod.string().nullish(),
+          url: zod.string().nullish(),
+          status: zod.number().nullish(),
+          duration: zod.number().nullish(),
+          requestBody: zod.string().nullish(),
+          requestHeaders: zod.record(zod.string(), zod.unknown()).nullish(),
+          responseHeaders: zod.record(zod.string(), zod.unknown()).nullish(),
+          error: zod.string().nullish(),
+          level: zod.string().nullish(),
+          message: zod.string().nullish(),
+          timestamp: zod.number(),
+          resourceType: zod.string().nullish(),
+        }),
+      ),
+    }),
+  );
+
+/**
+ * @summary Get current user profile and stats
+ */
+export const GetMeResponse = zod.object({
+  userId: zod.string(),
+  email: zod.string().nullish(),
+  firstName: zod.string().nullish(),
+  lastName: zod.string().nullish(),
+  totalRecordings: zod.number(),
+  apiKeyPreview: zod.string().nullish(),
+});
+
+/**
+ * @summary Generate a new API key for extension sync
+ */
+export const GenerateApiKeyResponse = zod.object({
+  apiKey: zod.string(),
+});
+
+/**
+ * @summary Request a presigned upload URL for object storage
+ */
+export const RequestUploadUrlBody = zod.object({
+  name: zod.string(),
+  size: zod.number(),
+  contentType: zod.string(),
+});
+
+export const RequestUploadUrlResponse = zod.object({
+  uploadURL: zod.string(),
+  objectPath: zod.string(),
 });

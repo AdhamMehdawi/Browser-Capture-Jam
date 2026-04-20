@@ -8,3 +8,142 @@
 export interface HealthStatus {
   status: string;
 }
+
+export type RecordingBrowserInfo = { [key: string]: unknown } | null;
+
+export interface Recording {
+  id: string;
+  userId: string;
+  title: string;
+  /** Duration in milliseconds */
+  duration: number;
+  createdAt: string;
+  pageUrl?: string | null;
+  pageTitle?: string | null;
+  networkLogsCount: number;
+  errorCount: number;
+  consoleCount: number;
+  clickCount: number;
+  videoObjectPath?: string | null;
+  shareToken?: string | null;
+  tags: string[];
+  browserInfo?: RecordingBrowserInfo;
+}
+
+export type NetworkLogEntryType =
+  (typeof NetworkLogEntryType)[keyof typeof NetworkLogEntryType];
+
+export const NetworkLogEntryType = {
+  request: "request",
+  console: "console",
+  click: "click",
+  navigation: "navigation",
+  performance: "performance",
+} as const;
+
+export type NetworkLogEntryRequestHeaders = { [key: string]: unknown } | null;
+
+export type NetworkLogEntryResponseHeaders = { [key: string]: unknown } | null;
+
+export interface NetworkLogEntry {
+  id: string;
+  type: NetworkLogEntryType;
+  method?: string | null;
+  url?: string | null;
+  status?: number | null;
+  duration?: number | null;
+  requestBody?: string | null;
+  requestHeaders?: NetworkLogEntryRequestHeaders;
+  responseHeaders?: NetworkLogEntryResponseHeaders;
+  error?: string | null;
+  level?: string | null;
+  message?: string | null;
+  timestamp: number;
+  resourceType?: string | null;
+}
+
+export type RecordingWithEvents = Recording & {
+  events: NetworkLogEntry[];
+};
+
+export interface RecordingListResponse {
+  recordings: Recording[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export type CreateRecordingBodyBrowserInfo = { [key: string]: unknown } | null;
+
+export interface CreateRecordingBody {
+  title: string;
+  duration: number;
+  pageUrl?: string | null;
+  pageTitle?: string | null;
+  tags?: string[];
+  events: NetworkLogEntry[];
+  videoObjectPath?: string | null;
+  browserInfo?: CreateRecordingBodyBrowserInfo;
+}
+
+export interface UpdateRecordingBody {
+  title?: string;
+  tags?: string[];
+}
+
+export type RecordingStatsTopErrorPagesItem = {
+  pageUrl: string;
+  errorCount: number;
+};
+
+export type RecordingStatsRequestsByDayItem = {
+  date: string;
+  count: number;
+};
+
+export interface RecordingStats {
+  totalRecordings: number;
+  totalDuration: number;
+  totalRequests: number;
+  totalErrors: number;
+  avgErrorRate: number;
+  recentActivity: Recording[];
+  topErrorPages: RecordingStatsTopErrorPagesItem[];
+  requestsByDay: RecordingStatsRequestsByDayItem[];
+}
+
+export interface ShareLinkResponse {
+  shareToken: string;
+  shareUrl: string;
+}
+
+export interface UserProfile {
+  userId: string;
+  email?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  totalRecordings: number;
+  apiKeyPreview?: string | null;
+}
+
+export interface ApiKeyResponse {
+  apiKey: string;
+}
+
+export interface RequestUploadUrlBody {
+  name: string;
+  size: number;
+  contentType: string;
+}
+
+export interface RequestUploadUrlResponse {
+  uploadURL: string;
+  objectPath: string;
+}
+
+export type ListRecordingsParams = {
+  page?: number;
+  limit?: number;
+  search?: string;
+  tag?: string;
+};

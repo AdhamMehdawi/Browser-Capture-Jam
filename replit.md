@@ -1,8 +1,15 @@
-# Workspace
+# SnapCap Workspace
 
 ## Overview
 
-pnpm workspace monorepo using TypeScript. Each package manages its own dependencies.
+Full-stack developer tool inspired by Jam.dev. Captures browser screen recordings, network requests, console logs, and user interactions — with a web dashboard for managing, replaying, and sharing sessions.
+
+## Architecture
+
+pnpm workspace monorepo with three main artifacts:
+- **Chrome Extension** (`artifacts/chrome-extension/`) — captures sessions in the browser
+- **API Server** (`artifacts/api-server/`) — Express + Clerk auth REST API
+- **SnapCap Dashboard** (`artifacts/snapcap-dashboard/`) — React + Vite web app at `/`
 
 ## Stack
 
@@ -10,39 +17,84 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 - **Node.js version**: 24
 - **Package manager**: pnpm
 - **TypeScript version**: 5.9
-- **API framework**: Express 5
-- **Database**: PostgreSQL + Drizzle ORM
+- **API framework**: Express 5 + Clerk Express middleware
+- **Auth**: Clerk (web dashboard + API server)
+- **Database**: PostgreSQL + Drizzle ORM (tables: recordings, snapcap_users)
 - **Validation**: Zod (`zod/v4`), `drizzle-zod`
-- **API codegen**: Orval (from OpenAPI spec)
-- **Build**: esbuild (CJS bundle)
+- **API codegen**: Orval (from OpenAPI spec at `lib/api-spec/openapi.yaml`)
+- **Frontend**: React + Vite + TanStack Query + Wouter routing
+- **UI**: shadcn/ui components + Tailwind CSS
+- **Object Storage**: Replit Object Storage (for video uploads)
+- **Build**: esbuild (for API server)
 
 ## Key Commands
 
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- `pnpm --filter @workspace/api-server run dev` — run API server locally
+```bash
+# Install all dependencies
+pnpm install
 
-See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.
+# Typecheck all packages
+pnpm run typecheck:libs
 
-## Chrome Extension: SnapCap
+# Push DB schema
+pnpm --filter @workspace/db run push
 
-Located at `artifacts/chrome-extension/`. A Manifest V3 Chrome extension inspired by Jam.dev.
+# Run Orval codegen (always fix api-zod/src/index.ts after)
+cd lib/api-spec && npx orval --config ./orval.config.ts
+# Then immediately write: lib/api-zod/src/index.ts → `export * from "./generated/api";`
 
-### Features
-- Screen recording via `getDisplayMedia` API
-- Network request/response capture via `chrome.webRequest`
-- Console log interception (log, warn, error, info, debug)
-- Unhandled JS error + promise rejection capture
-- Full viewer page with video playback + filterable log inspector
-- Download video (.webm) and logs (.json)
+# Build API server
+pnpm --filter @workspace/api-server run build
+```
 
-### Files
-- `manifest.json` — Extension manifest (MV3)
-- `background.js` — Service worker: network interception, state management
-- `content.js` — Page content script: console interception
-- `popup.html/css/js` — Extension popup UI
-- `viewer.html/css/js` — Full recording viewer page
-- `icons/` — Extension icons (16, 32, 48, 128px)
-- `HOW_TO_INSTALL.md` — Installation and usage instructions
+## Important Notes
+
+### Orval Codegen Fix
+After every `orval` run, you MUST write `lib/api-zod/src/index.ts` with just:
+```ts
+export * from "./generated/api";
+```
+Orval overwrites this file with a duplicate export that breaks the build.
+
+### API Client Hooks
+Generated hooks live in `lib/api-client-react/src/generated/api.ts`. Import from `@workspace/api-client-react`.
+Always pass `queryKey` when using `enabled`:
+```ts
+useGetThing(id, { query: { enabled: !!id, queryKey: getGetThingQueryKey(id) } })
+```
+
+### Chrome Extension
+- `background.js` — service worker: network interception, message bus, backend sync
+- `content.js` — injected in pages: console capture, click tracking, navigation, performance
+- `popup.js/html` — recording UI with settings panel (API key + server URL for sync)
+- `viewer.html/js` — replays saved recordings (video + network/console log explorer)
+
+### API Routes
+- `GET/POST /api/recordings` — list and create recordings
+- `GET/PATCH/DELETE /api/recordings/:id` — manage single recording
+- `GET /api/recordings/stats` — dashboard statistics
+- `POST /api/recordings/:id/share` — create share link
+- `DELETE /api/recordings/:id/share` — revoke share link
+- `GET /api/share/:token` — public shared recording (no auth)
+- `GET /api/me` — user profile + API key preview
+- `POST /api/me/api-key` — generate API key for extension sync
+- `POST /api/storage/uploads/request-url` — presigned upload URL
+
+### DB Schema
+- `recordings` table: id (uuid), userId, title, duration, pageUrl, pageTitle, events (jsonb), tags (text[]), videoObjectPath, shareToken, counts, browserInfo, timestamps
+- `snapcap_users` table: id (Clerk userId), apiKey, apiKeyPreview, timestamps
+
+## Artifacts
+
+| Artifact | Path | Description |
+|---|---|---|
+| `chrome-extension` | (loadable in Chrome) | Browser extension |
+| `api-server` | `/api/*` | Express REST API |
+| `snapcap-dashboard` | `/` | React dashboard |
+
+## Environment Secrets
+
+- `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY`, `VITE_CLERK_PUBLISHABLE_KEY` — Clerk auth
+- `DATABASE_URL` — PostgreSQL
+- `DEFAULT_OBJECT_STORAGE_BUCKET_ID`, `PRIVATE_OBJECT_DIR`, `PUBLIC_OBJECT_SEARCH_PATHS` — Object storage
+- `SESSION_SECRET` — session signing

@@ -1,276 +1,320 @@
-// Popup script for SnapCap extension
+// SnapCap popup controller
 
 let mediaRecorder = null;
 let recordedChunks = [];
 let timerInterval = null;
 let statsInterval = null;
-let startTime = null;
-let currentTabId = null;
-let savedData = null;
+let recordingTabId = null;
+let recordingStartTime = null;
+let currentRecordingId = null;
 
-const $ = (id) => document.getElementById(id);
+// ---- State sections ----
+const sections = {
+  idle: null,
+  recording: null,
+  saved: null,
+};
 
-// State
-let appState = 'idle'; // idle | recording | saved
+function $(id) { return document.getElementById(id); }
 
-function setView(view) {
-  appState = view;
-  $('mainIdle').classList.toggle('hidden', view !== 'idle');
-  $('mainRecording').classList.toggle('hidden', view !== 'recording');
-  $('mainSaved').classList.toggle('hidden', view !== 'saved');
+function showSection(name) {
+  Object.entries(sections).forEach(([key, el]) => {
+    if (el) el.classList.toggle('hidden', key !== name);
+  });
+}
 
+function setStatus(text, type = 'idle') {
   const badge = $('statusBadge');
-  badge.className = 'status-badge';
-  if (view === 'recording') {
-    badge.classList.add('recording');
-    $('statusText').textContent = 'Recording';
-  } else if (view === 'saved') {
-    badge.classList.add('saved');
-    $('statusText').textContent = 'Saved';
-  } else {
-    $('statusText').textContent = 'Ready';
-  }
+  const statusText = $('statusText');
+  if (statusText) statusText.textContent = text;
+  if (badge) badge.className = `status-badge status-badge--${type}`;
 }
 
 function showError(msg) {
   const bar = $('errorBar');
-  $('errorMsg').textContent = msg;
-  bar.classList.remove('hidden');
-  setTimeout(() => bar.classList.add('hidden'), 5000);
+  const el = $('errorMsg');
+  if (el) el.textContent = msg;
+  if (bar) bar.classList.remove('hidden');
+  setTimeout(() => { if (bar) bar.classList.add('hidden'); }, 4000);
 }
 
-function formatTime(ms) {
-  const total = Math.floor(ms / 1000);
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
+// ---- Settings ----
+function initSettings() {
+  const btn = $('btnSettings');
+  const panel = $('settingsPanel');
+  if (!btn || !panel) return;
 
-async function getCurrentTab() {
-  return new Promise((resolve) => {
-    chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => resolve(tab));
+  btn.addEventListener('click', () => {
+    panel.classList.toggle('hidden');
+  });
+
+  $('btnSaveSettings').addEventListener('click', () => {
+    const apiKey = $('apiKeyInput').value.trim();
+    const serverUrl = $('serverUrlInput').value.trim();
+    chrome.storage.sync.set({ apiKey, serverUrl }, () => {
+      const s = $('settingsSyncStatus');
+      if (s) { s.textContent = 'Saved.'; setTimeout(() => { s.textContent = ''; }, 2000); }
+    });
+  });
+
+  chrome.storage.sync.get(['apiKey', 'serverUrl'], (data) => {
+    if ($('apiKeyInput')) $('apiKeyInput').value = data.apiKey || '';
+    if ($('serverUrlInput')) $('serverUrlInput').value = data.serverUrl || '';
   });
 }
 
+// ---- Recording ----
 async function startRecording() {
   try {
-    const tab = await getCurrentTab();
-    currentTabId = tab.id;
+    showError('');
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    recordingTabId = tab.id;
 
-    const captureNetwork = $('captureNetwork').checked;
-    const captureMic = $('captureMic').checked;
+    await chrome.runtime.sendMessage({ action: 'START_RECORDING', tabId: recordingTabId });
 
-    // Request screen capture
-    let stream;
-    try {
-      const videoConstraints = {
-        video: {
-          cursor: 'always',
-          displaySurface: 'browser',
-        },
-        audio: captureMic,
-      };
-      stream = await navigator.mediaDevices.getDisplayMedia(videoConstraints);
-    } catch (e) {
-      showError('Screen capture was cancelled or denied.');
-      return;
-    }
+    const captureMic = $('captureMic')?.checked || false;
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { mediaSource: 'tab' },
+      audio: captureMic ? true : false,
+    });
 
-    // Start network/console capturing in background
-    if (captureNetwork) {
-      await chrome.runtime.sendMessage({ action: 'START_RECORDING', tabId: currentTabId });
-    }
-
-    // Set up MediaRecorder
     recordedChunks = [];
-    const mimeType = getSupportedMimeType();
-    const options = mimeType ? { mimeType } : {};
+    const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+      ? 'video/webm;codecs=vp9'
+      : 'video/webm';
 
-    mediaRecorder = new MediaRecorder(stream, options);
+    mediaRecorder = new MediaRecorder(stream, { mimeType });
+    mediaRecorder.ondataavailable = (e) => { if (e.data?.size > 0) recordedChunks.push(e.data); };
+    mediaRecorder.onstop = () => { stream.getTracks().forEach((t) => t.stop()); finishRecording(); };
+    mediaRecorder.start(1000);
 
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0) {
-        recordedChunks.push(e.data);
-      }
-    };
+    // Start timer
+    recordingStartTime = Date.now();
+    timerInterval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+      const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+      const s = String(elapsed % 60).padStart(2, '0');
+      const el = $('recordingTimer');
+      if (el) el.textContent = `${m}:${s}`;
+    }, 500);
 
-    mediaRecorder.onstop = async () => {
-      stream.getTracks().forEach((t) => t.stop());
-      await finishRecording();
-    };
+    // Live stats polling
+    statsInterval = setInterval(async () => {
+      try {
+        const res = await chrome.runtime.sendMessage({ action: 'GET_STATE', tabId: recordingTabId });
+        const logsRes = await chrome.runtime.sendMessage({ action: 'GET_NETWORK_LOGS', tabId: recordingTabId });
+        const logs = logsRes?.logs || [];
+        const requests = logs.filter((e) => e.type === 'request').length;
+        const errors = logs.filter(
+          (e) => (e.type === 'request' && (e.error || (e.status && e.status >= 400))) ||
+                 (e.type === 'console' && e.level === 'error')
+        ).length;
+        const consoles = logs.filter((e) => e.type === 'console').length;
+        if ($('networkCount')) $('networkCount').textContent = requests;
+        if ($('errorCount')) $('errorCount').textContent = errors;
+        if ($('consoleCount')) $('consoleCount').textContent = consoles;
+      } catch (e) {}
+    }, 1000);
 
-    // Handle user stopping via browser's native stop button
-    stream.getVideoTracks()[0].onended = () => {
-      if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-        mediaRecorder.stop();
-      }
-    };
-
-    mediaRecorder.start(1000); // Collect data every 1s
-    startTime = Date.now();
-
-    // Update UI
-    setView('recording');
-    startTimer();
-    if (captureNetwork) startStatsUpdater();
-
-  } catch (e) {
-    showError(`Failed to start: ${e.message}`);
-    console.error(e);
+    showSection('recording');
+    setStatus('Recording', 'recording');
+  } catch (err) {
+    if (err.name !== 'NotAllowedError') showError(`Error: ${err.message}`);
+    else setStatus('Ready');
+    chrome.runtime.sendMessage({ action: 'CLEAR_RECORDING', tabId: recordingTabId });
   }
-}
-
-function getSupportedMimeType() {
-  const types = [
-    'video/webm;codecs=vp9,opus',
-    'video/webm;codecs=vp8,opus',
-    'video/webm',
-    'video/mp4',
-  ];
-  for (const type of types) {
-    if (MediaRecorder.isTypeSupported(type)) return type;
-  }
-  return null;
-}
-
-function startTimer() {
-  $('recordingTimer').textContent = '0:00';
-  timerInterval = setInterval(() => {
-    $('recordingTimer').textContent = formatTime(Date.now() - startTime);
-  }, 500);
-}
-
-function startStatsUpdater() {
-  statsInterval = setInterval(async () => {
-    try {
-      const res = await chrome.runtime.sendMessage({ action: 'GET_NETWORK_LOGS', tabId: currentTabId });
-      if (res && res.logs) {
-        const network = res.logs.filter((l) => l.type === 'request');
-        const errors = res.logs.filter((l) => (l.type === 'request' && (l.error || (l.status >= 400))) || (l.type === 'console' && l.level === 'error'));
-        const consoleLogs = res.logs.filter((l) => l.type === 'console');
-        $('networkCount').textContent = network.length;
-        $('errorCount').textContent = errors.length;
-        $('consoleCount').textContent = consoleLogs.length;
-      }
-    } catch (e) {}
-  }, 1000);
 }
 
 async function stopRecording() {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop();
-  }
   clearInterval(timerInterval);
   clearInterval(statsInterval);
+  setStatus('Saving…');
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+  } else {
+    finishRecording();
+  }
 }
 
 async function finishRecording() {
-  const duration = Date.now() - startTime;
-
-  // Fetch network logs
-  let networkLogs = [];
   try {
-    const res = await chrome.runtime.sendMessage({ action: 'STOP_RECORDING', tabId: currentTabId });
-    if (res && res.networkLogs) networkLogs = res.networkLogs;
-  } catch (e) {}
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tabId = recordingTabId || tab.id;
 
-  // Build video blob
-  const videoBlob = recordedChunks.length > 0
-    ? new Blob(recordedChunks, { type: recordedChunks[0]?.type || 'video/webm' })
-    : null;
+    const bgRes = await chrome.runtime.sendMessage({ action: 'STOP_RECORDING', tabId });
+    const networkLogs = bgRes?.networkLogs || [];
 
-  // Save to chrome.storage.local
-  const recordingId = `rec-${Date.now()}`;
-  const meta = {
-    id: recordingId,
-    createdAt: Date.now(),
-    duration,
-    networkLogs,
-    requestCount: networkLogs.filter((l) => l.type === 'request').length,
-    errorCount: networkLogs.filter((l) => l.type === 'request' && (l.error || l.status >= 400)).length,
-    consoleCount: networkLogs.filter((l) => l.type === 'console').length,
-  };
+    let videoDataUrl = null;
+    if (recordedChunks.length > 0) {
+      const blob = new Blob(recordedChunks, { type: 'video/webm' });
+      videoDataUrl = await blobToDataUrl(blob);
+    }
 
-  // Store metadata + video as dataURL in storage
-  if (videoBlob) {
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      meta.videoDataUrl = e.target.result;
-      await chrome.storage.local.set({ [recordingId]: meta, lastRecordingId: recordingId });
-      savedData = meta;
-      showSaved(meta);
+    const duration = recordingStartTime ? Date.now() - recordingStartTime : 0;
+    const recId = generateId();
+    currentRecordingId = recId;
+
+    const recording = {
+      id: recId,
+      title: `${tab.title || 'Recording'} — ${formatDateTime(new Date())}`,
+      pageUrl: tab.url || null,
+      pageTitle: tab.title || null,
+      duration,
+      networkLogs,
+      videoDataUrl,
+      tags: [],
+      createdAt: Date.now(),
+      browserInfo: {
+        userAgent: navigator.userAgent,
+        language: navigator.language,
+        platform: navigator.platform,
+      },
     };
-    reader.readAsDataURL(videoBlob);
-  } else {
-    await chrome.storage.local.set({ [recordingId]: meta, lastRecordingId: recordingId });
-    savedData = meta;
-    showSaved(meta);
+
+    await chrome.storage.local.set({ [`recording-${recId}`]: recording });
+    const idxRes = await chrome.storage.local.get(['recordingIds']);
+    const ids = idxRes.recordingIds || [];
+    ids.unshift(recId);
+    await chrome.storage.local.set({ recordingIds: ids });
+
+    // Update saved panel
+    const secs = Math.round(duration / 1000);
+    const m = String(Math.floor(secs / 60)).padStart(2, '0');
+    const s = String(secs % 60).padStart(2, '0');
+    if ($('savedDuration')) $('savedDuration').textContent = `${m}:${s}`;
+    const reqCount = networkLogs.filter((e) => e.type === 'request').length;
+    if ($('savedRequests')) $('savedRequests').textContent = `${reqCount} requests`;
+
+    showSection('saved');
+    setStatus('Saved');
+    recordedChunks = [];
+  } catch (err) {
+    showError(`Save error: ${err.message}`);
+    showSection('idle');
+    setStatus('Ready');
   }
 }
 
-function showSaved(meta) {
-  $('savedDuration').textContent = formatTime(meta.duration);
-  $('savedRequests').textContent = `${meta.requestCount} request${meta.requestCount !== 1 ? 's' : ''}`;
-  setView('saved');
-}
-
-async function openViewer() {
-  if (!savedData) return;
-  const viewerUrl = chrome.runtime.getURL('viewer.html') + `?id=${savedData.id}`;
-  chrome.tabs.create({ url: viewerUrl });
+// ---- Saved actions ----
+async function viewRecording() {
+  if (!currentRecordingId) return;
+  const url = chrome.runtime.getURL(`viewer.html?id=${currentRecordingId}`);
+  chrome.tabs.create({ url });
 }
 
 async function downloadRecording() {
-  if (!savedData) return;
-
-  // Download video
-  if (savedData.videoDataUrl) {
-    const a = document.createElement('a');
-    a.href = savedData.videoDataUrl;
-    const ext = savedData.videoDataUrl.startsWith('data:video/mp4') ? 'mp4' : 'webm';
-    a.download = `snapcap-${new Date().toISOString().replace(/[:.]/g, '-')}.${ext}`;
-    a.click();
-  }
-
-  // Download network log as JSON
-  const logJson = JSON.stringify({
-    id: savedData.id,
-    createdAt: new Date(savedData.createdAt).toISOString(),
-    duration: savedData.duration,
-    networkLogs: savedData.networkLogs,
-  }, null, 2);
-
-  const blob = new Blob([logJson], { type: 'application/json' });
+  if (!currentRecordingId) return;
+  const stored = await chrome.storage.local.get([`recording-${currentRecordingId}`]);
+  const rec = stored[`recording-${currentRecordingId}`];
+  if (!rec) return;
+  const exportData = { ...rec, videoDataUrl: undefined };
+  const json = JSON.stringify(exportData, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `snapcap-logs-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+  a.download = `snapcap-${currentRecordingId}.json`;
   a.click();
   URL.revokeObjectURL(url);
 }
 
-// Event listeners
-$('btnRecord').addEventListener('click', startRecording);
-$('btnStop').addEventListener('click', stopRecording);
-$('btnView').addEventListener('click', openViewer);
-$('btnDownload').addEventListener('click', downloadRecording);
-$('btnNew').addEventListener('click', () => {
-  savedData = null;
-  setView('idle');
-});
+async function syncToDashboard() {
+  if (!currentRecordingId) return;
 
-// Init: check if already recording
-(async () => {
+  const settings = await new Promise((r) => chrome.storage.sync.get(['apiKey', 'serverUrl'], r));
+  if (!settings.apiKey) {
+    const s = $('syncStatus');
+    if (s) { s.textContent = 'Add API key in settings first.'; setTimeout(() => { s.textContent = ''; }, 3000); }
+    return;
+  }
+
+  const btn = $('btnSyncToDashboard');
+  if (btn) { btn.textContent = 'Syncing…'; btn.disabled = true; }
+
   try {
-    const tab = await getCurrentTab();
-    currentTabId = tab.id;
-    const res = await chrome.runtime.sendMessage({ action: 'GET_STATE', tabId: tab.id });
-    if (res && res.isRecording) {
-      // Reconnect to existing recording state
-      setView('recording');
-      // Can't reconnect MediaRecorder across popup close, so show a message
-      showError('A recording was in progress. It may have been interrupted when the popup closed. Click Stop to save what was captured.');
+    const result = await chrome.runtime.sendMessage({
+      action: 'SYNC_TO_BACKEND',
+      recordingId: `recording-${currentRecordingId}`,
+      apiKey: settings.apiKey,
+      serverUrl: settings.serverUrl,
+    });
+
+    const s = $('syncStatus');
+    if (result.success) {
+      if (btn) btn.textContent = 'Synced';
+      if (s) { s.textContent = 'Uploaded to dashboard.'; setTimeout(() => { s.textContent = ''; }, 4000); }
+    } else {
+      if (btn) { btn.textContent = 'Sync to Dashboard'; btn.disabled = false; }
+      if (s) { s.textContent = `Failed: ${result.error}`; setTimeout(() => { s.textContent = ''; }, 4000); }
     }
-  } catch (e) {}
-  setView('idle');
-})();
+  } catch (err) {
+    if (btn) { btn.textContent = 'Sync to Dashboard'; btn.disabled = false; }
+    showError(`Sync error: ${err.message}`);
+  }
+}
+
+function newRecording() {
+  showSection('idle');
+  setStatus('Ready');
+  currentRecordingId = null;
+}
+
+// ---- Utilities ----
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+function generateId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function formatDateTime(date) {
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) +
+    ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+// ---- Init ----
+document.addEventListener('DOMContentLoaded', async () => {
+  sections.idle = $('mainIdle');
+  sections.recording = $('mainRecording');
+  sections.saved = $('mainSaved');
+
+  initSettings();
+
+  $('btnRecord')?.addEventListener('click', startRecording);
+  $('btnStop')?.addEventListener('click', stopRecording);
+  $('btnView')?.addEventListener('click', viewRecording);
+  $('btnDownload')?.addEventListener('click', downloadRecording);
+  $('btnSyncToDashboard')?.addEventListener('click', syncToDashboard);
+  $('btnNew')?.addEventListener('click', newRecording);
+
+  // Check if already recording
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const res = await chrome.runtime.sendMessage({ action: 'GET_STATE', tabId: tab.id });
+    if (res?.isRecording) {
+      recordingTabId = tab.id;
+      recordingStartTime = Date.now() - (res.elapsed || 0);
+      showSection('recording');
+      setStatus('Recording', 'recording');
+      timerInterval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+        const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+        const s = String(elapsed % 60).padStart(2, '0');
+        const el = $('recordingTimer');
+        if (el) el.textContent = `${m}:${s}`;
+      }, 500);
+    } else {
+      showSection('idle');
+      setStatus('Ready');
+    }
+  } catch (e) {
+    showSection('idle');
+    setStatus('Ready');
+  }
+});

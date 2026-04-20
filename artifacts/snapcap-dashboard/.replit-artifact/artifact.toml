@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "SnapCap Dashboard"
+version = "1.0.0"
+id = "artifacts/snapcap-dashboard"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22388
+
+[services.development]
+run = "pnpm --filter @workspace/snapcap-dashboard run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/snapcap-dashboard", "run", "build" ]
+publicDir = "artifacts/snapcap-dashboard/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22388"
+BASE_PATH = "/"

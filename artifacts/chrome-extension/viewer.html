@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SnapCap Viewer</title>
+  <link rel="stylesheet" href="viewer.css" />
+</head>
+<body>
+  <div class="layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo">
+          <div class="logo-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+              <circle cx="12" cy="12" r="4" fill="currentColor"/>
+            </svg>
+          </div>
+          <span class="logo-text">SnapCap</span>
+        </div>
+        <div class="recording-meta" id="recordingMeta">
+          <span id="recDate">—</span>
+          <span id="recDuration">—</span>
+        </div>
+      </div>
+
+      <div class="filter-tabs">
+        <button class="filter-tab active" data-filter="all">All</button>
+        <button class="filter-tab" data-filter="request">Network</button>
+        <button class="filter-tab" data-filter="error">Errors</button>
+        <button class="filter-tab" data-filter="console">Console</button>
+      </div>
+
+      <div class="search-bar">
+        <svg class="search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="8" stroke="currentColor" stroke-width="2"/><path d="m21 21-4.35-4.35" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <input type="text" id="searchInput" placeholder="Search logs..." />
+      </div>
+
+      <div class="log-list" id="logList">
+        <div class="empty-state">No logs yet.</div>
+      </div>
+    </aside>
+
+    <!-- Main area -->
+    <main class="content">
+      <!-- Video player -->
+      <div class="video-section">
+        <div class="video-wrapper" id="videoWrapper">
+          <div class="no-video" id="noVideo">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none"><rect x="2" y="7" width="15" height="10" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="m17 9 5-2v10l-5-2V9Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+            <p>No video recorded</p>
+          </div>
+          <video id="videoPlayer" controls></video>
+        </div>
+
+        <div class="video-controls">
+          <div class="stat-chips" id="statChips">
+            <span class="chip chip-neutral" id="chipTotal">0 events</span>
+            <span class="chip chip-blue" id="chipRequests">0 requests</span>
+            <span class="chip chip-red" id="chipErrors">0 errors</span>
+            <span class="chip chip-yellow" id="chipConsole">0 console</span>
+          </div>
+          <button class="btn-download" id="btnDownload">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Download All
+          </button>
+        </div>
+      </div>
+
+      <!-- Detail panel -->
+      <div class="detail-panel" id="detailPanel">
+        <div class="detail-placeholder">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" stroke="currentColor" stroke-width="1.5"/><polyline points="14,2 14,8 20,8" stroke="currentColor" stroke-width="1.5"/></svg>
+          <p>Select a log entry to inspect details</p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="viewer.js"></script>
+</body>
+</html>

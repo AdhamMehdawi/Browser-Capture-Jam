@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SnapCap</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="logo">
+        <div class="logo-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+            <circle cx="12" cy="12" r="4" fill="currentColor"/>
+          </svg>
+        </div>
+        <span class="logo-text">SnapCap</span>
+      </div>
+      <div class="status-badge" id="statusBadge">
+        <span class="status-dot"></span>
+        <span id="statusText">Ready</span>
+      </div>
+    </header>
+
+    <div class="main" id="mainIdle">
+      <div class="record-area">
+        <div class="record-hint">
+          <p>Capture your screen and all network activity in one click.</p>
+        </div>
+        <button class="btn-record" id="btnRecord">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/>
+            <circle cx="12" cy="12" r="5" fill="currentColor"/>
+          </svg>
+          Start Recording
+        </button>
+      </div>
+      <div class="options">
+        <label class="option-toggle">
+          <input type="checkbox" id="captureMic" />
+          <span class="toggle-label">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4Z" stroke="currentColor" stroke-width="2"/><path d="M19 10a7 7 0 0 1-14 0M12 19v4M8 23h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            Include microphone
+          </span>
+        </label>
+        <label class="option-toggle">
+          <input type="checkbox" id="captureNetwork" checked />
+          <span class="toggle-label">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5ZM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Capture network logs
+          </span>
+        </label>
+        <label class="option-toggle">
+          <input type="checkbox" id="captureConsole" checked />
+          <span class="toggle-label">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><polyline points="4 17 10 11 4 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="12" y1="19" x2="20" y2="19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            Capture console logs
+          </span>
+        </label>
+      </div>
+    </div>
+
+    <div class="main hidden" id="mainRecording">
+      <div class="recording-indicator">
+        <div class="pulse-ring"></div>
+        <div class="pulse-dot"></div>
+      </div>
+      <div class="recording-info">
+        <div class="recording-label">Recording...</div>
+        <div class="recording-timer" id="recordingTimer">0:00</div>
+      </div>
+      <div class="live-stats">
+        <div class="stat">
+          <span class="stat-num" id="networkCount">0</span>
+          <span class="stat-label">Requests</span>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat">
+          <span class="stat-num" id="errorCount">0</span>
+          <span class="stat-label">Errors</span>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat">
+          <span class="stat-num" id="consoleCount">0</span>
+          <span class="stat-label">Console</span>
+        </div>
+      </div>
+      <button class="btn-stop" id="btnStop">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+        Stop & Save
+      </button>
+    </div>
+
+    <div class="main hidden" id="mainSaved">
+      <div class="saved-icon">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="10" stroke="#22c55e" stroke-width="2"/>
+          <path d="M8 12l3 3 5-5" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="saved-title">Recording Saved!</div>
+      <div class="saved-summary" id="savedSummary">
+        <span id="savedDuration">0:00</span> &bull; <span id="savedRequests">0 requests</span>
+      </div>
+      <div class="saved-actions">
+        <button class="btn-primary" id="btnView">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/></svg>
+          View Recording
+        </button>
+        <button class="btn-secondary" id="btnDownload">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Download
+        </button>
+      </div>
+      <button class="btn-new" id="btnNew">Start new recording</button>
+    </div>
+
+    <div class="error-bar hidden" id="errorBar">
+      <span id="errorMsg"></span>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

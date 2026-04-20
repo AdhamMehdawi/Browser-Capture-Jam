@@ -1,0 +1,49 @@
+{
+  "manifest_version": 3,
+  "name": "SnapCap - Screen & Network Recorder",
+  "version": "1.0.0",
+  "description": "Capture browser screen recordings and network requests, just like Jam.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "webRequest",
+    "tabs",
+    "desktopCapture"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_title": "SnapCap Recorder"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["viewer.html", "viewer.js", "viewer.css"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

@@ -48,10 +48,37 @@
       </div>
     </div>
 
-    <div class="main" id="mainIdle">
+    <!-- First-run connect card: shown when no API key is configured yet. -->
+    <div class="main hidden" id="mainConnect">
       <div class="record-area">
         <div class="record-hint">
-          <p>Capture your screen and all network activity in one click.</p>
+          <p><strong>Welcome to SnapCap.</strong> Connect to your dashboard to sync recordings.</p>
+        </div>
+        <button class="btn-record" id="btnOpenDashboard">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          Open Dashboard → copy API key
+        </button>
+        <div style="font-size:12px;color:var(--muted,#888);margin-top:12px;text-align:center;">
+          Sign in on the dashboard, go to Settings, generate an API key, then paste it below.
+        </div>
+        <div class="field-group" style="margin-top:12px;">
+          <label class="field-label">Paste API Key</label>
+          <input type="password" class="field-input" id="apiKeyInputConnect" placeholder="sc_••••••••••••" />
+        </div>
+        <div class="field-group">
+          <label class="field-label">Server URL</label>
+          <input type="text" class="field-input" id="serverUrlInputConnect" placeholder="https://your-app.replit.app" />
+        </div>
+        <button class="btn-primary" id="btnConnect" style="width:100%;margin-top:8px;">Connect</button>
+        <div class="sync-status" id="connectStatus" style="margin-top:8px;text-align:center;"></div>
+        <button class="btn-new" id="btnSkipConnect" style="margin-top:8px;">Skip — record locally only</button>
+      </div>
+    </div>
+
+    <div class="main hidden" id="mainIdle">
+      <div class="record-area">
+        <div class="record-hint">
+          <p id="connectedHint">Capture your screen and all network activity in one click.</p>
         </div>
         <button class="btn-record" id="btnRecord">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none">

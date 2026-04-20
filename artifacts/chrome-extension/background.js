@@ -118,6 +118,31 @@ function updateEvent(tabId, requestId, updates) {
   if (entry) Object.assign(entry, updates);
 }
 
+// ---- Overlay helpers ----
+// Drives the in-page recording pill on the tab being recorded. Survives
+// popup close — state lives in the SW (or is re-derived from recordingState).
+async function showOverlayOn(tabId, startedAt) {
+  try {
+    await chrome.tabs.sendMessage(tabId, { action: 'SHOW_OVERLAY', startedAt });
+  } catch (e) {
+    // Content script isn't loaded (tab opened before install). Inject and retry.
+    try {
+      await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+      await chrome.tabs.sendMessage(tabId, { action: 'SHOW_OVERLAY', startedAt });
+    } catch (err) {
+      console.warn('[snapcap/bg] overlay inject failed', err);
+    }
+  }
+}
+
+async function hideOverlayOn(tabId) {
+  try {
+    await chrome.tabs.sendMessage(tabId, { action: 'HIDE_OVERLAY' });
+  } catch (e) {
+    // tab may be gone — ignore
+  }
+}
+
 // ---- Message handler ----
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const tabId = message.tabId || (sender.tab && sender.tab.id);
@@ -125,7 +150,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   switch (message.action) {
     case 'START_RECORDING': {
       networkLogs.set(tabId, []);
-      recordingState.set(tabId, { isRecording: true, startTime: Date.now() });
+      const startTime = Date.now();
+      recordingState.set(tabId, { isRecording: true, startTime });
+      // Fire-and-forget — inject the floating pill on the recorded tab.
+      if (tabId) showOverlayOn(tabId, startTime);
       sendResponse({ success: true });
       break;
     }
@@ -134,8 +162,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (recordingState.has(tabId)) {
         recordingState.get(tabId).isRecording = false;
       }
+      if (tabId) hideOverlayOn(tabId);
       const logs = networkLogs.get(tabId) || [];
       sendResponse({ success: true, networkLogs: logs });
+      break;
+    }
+
+    case 'OVERLAY_STOP': {
+      // Stop button clicked on the in-page pill. Find the tab it came from
+      // (the active tab on this window) and tell the popup-side controller
+      // to finalize. We just mark not-recording here and broadcast — the
+      // popup is stateful and will save on next poll; if the popup is
+      // closed, the user can reopen it to see the Saved state.
+      const recTabId = sender.tab && sender.tab.id;
+      if (recTabId != null && recordingState.has(recTabId)) {
+        recordingState.get(recTabId).isRecording = false;
+      }
+      if (recTabId != null) hideOverlayOn(recTabId);
+      // Notify the popup (if open) that the user requested stop.
+      chrome.runtime.sendMessage({ action: 'OVERLAY_STOP_REQUESTED', tabId: recTabId }).catch(() => {});
+      sendResponse({ success: true });
       break;
     }
 

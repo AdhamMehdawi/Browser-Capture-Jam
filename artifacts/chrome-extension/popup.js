@@ -10,6 +10,7 @@ let currentRecordingId = null;
 
 // ---- State sections ----
 const sections = {
+  connect: null,
   idle: null,
   recording: null,
   saved: null,
@@ -36,6 +37,73 @@ function showError(msg) {
   if (el) el.textContent = msg;
   if (bar) bar.classList.remove('hidden');
   setTimeout(() => { if (bar) bar.classList.add('hidden'); }, 4000);
+}
+
+// ---- First-run connect flow ----
+// The extension can't do Clerk OAuth cleanly from a Chromium popup, so
+// "login" here means: open the dashboard in a real tab, sign in, copy the
+// API key from Dashboard → Settings, and paste it back. This card makes
+// that the front-and-centre experience until an API key is saved.
+function initConnect() {
+  const openBtn = document.getElementById('btnOpenDashboard');
+  const connectBtn = document.getElementById('btnConnect');
+  const skipBtn = document.getElementById('btnSkipConnect');
+  const statusEl = document.getElementById('connectStatus');
+  const apiInput = document.getElementById('apiKeyInputConnect');
+  const urlInput = document.getElementById('serverUrlInputConnect');
+  if (!openBtn || !connectBtn) return;
+
+  openBtn.addEventListener('click', () => {
+    const url = (urlInput?.value || '').trim() || 'https://your-app.replit.app';
+    chrome.tabs.create({ url });
+  });
+
+  connectBtn.addEventListener('click', async () => {
+    const apiKey = (apiInput?.value || '').trim();
+    const serverUrl = (urlInput?.value || '').trim();
+    if (!apiKey || !serverUrl) {
+      if (statusEl) statusEl.textContent = 'Enter both API key and server URL.';
+      return;
+    }
+    connectBtn.disabled = true;
+    connectBtn.textContent = 'Verifying…';
+    // Ping /api/user/me to validate the key. If the backend auth accepts
+    // API-key-as-Bearer, great — otherwise we still save it so the user
+    // can try sync later without re-entering.
+    let ok = false;
+    try {
+      const res = await fetch(serverUrl.replace(/\/$/, '') + '/api/user/me', {
+        headers: { Authorization: 'Bearer ' + apiKey },
+      });
+      ok = res.ok;
+    } catch (e) {}
+    await new Promise((r) => chrome.storage.sync.set({ apiKey, serverUrl }, r));
+    if (statusEl) statusEl.textContent = ok ? 'Connected.' : 'Saved (couldn\'t verify — sync will try anyway).';
+    showSection('idle');
+    refreshConnectedHint();
+    connectBtn.textContent = 'Connect';
+    connectBtn.disabled = false;
+  });
+
+  skipBtn?.addEventListener('click', () => {
+    showSection('idle');
+  });
+}
+
+async function refreshConnectedHint() {
+  const hint = document.getElementById('connectedHint');
+  if (!hint) return;
+  const data = await new Promise((r) => chrome.storage.sync.get(['apiKey', 'serverUrl'], r));
+  if (data.apiKey && data.serverUrl) {
+    try {
+      const host = new URL(data.serverUrl).host;
+      hint.textContent = 'Connected to ' + host + ' — recordings can be synced to your dashboard.';
+    } catch {
+      hint.textContent = 'Connected — recordings can be synced.';
+    }
+  } else {
+    hint.textContent = 'Capture your screen and all network activity in one click.';
+  }
 }
 
 // ---- Settings ----
@@ -280,11 +348,13 @@ function formatDateTime(date) {
 
 // ---- Init ----
 document.addEventListener('DOMContentLoaded', async () => {
+  sections.connect = $('mainConnect');
   sections.idle = $('mainIdle');
   sections.recording = $('mainRecording');
   sections.saved = $('mainSaved');
 
   initSettings();
+  initConnect();
 
   $('btnRecord')?.addEventListener('click', startRecording);
   $('btnStop')?.addEventListener('click', stopRecording);
@@ -293,7 +363,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('btnSyncToDashboard')?.addEventListener('click', syncToDashboard);
   $('btnNew')?.addEventListener('click', newRecording);
 
-  // Check if already recording
+  // React to the in-page overlay's Stop button.
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg?.action === 'OVERLAY_STOP_REQUESTED') {
+      stopRecording();
+    }
+  });
+
+  await refreshConnectedHint();
+
+  // Check if already recording; otherwise decide between Connect (first run)
+  // and Idle (configured).
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     const res = await chrome.runtime.sendMessage({ action: 'GET_STATE', tabId: tab.id });
@@ -310,8 +390,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (el) el.textContent = `${m}:${s}`;
       }, 500);
     } else {
-      showSection('idle');
-      setStatus('Ready');
+      const cfg = await new Promise((r) => chrome.storage.sync.get(['apiKey', 'serverUrl'], r));
+      if (!cfg.apiKey || !cfg.serverUrl) {
+        // First run — prompt the user to connect before anything else.
+        showSection('connect');
+        setStatus('Not connected');
+      } else {
+        showSection('idle');
+        setStatus('Ready');
+      }
     }
   } catch (e) {
     showSection('idle');

@@ -225,4 +225,99 @@
       }).catch(() => {});
     } catch (e) {}
   };
+
+  // ================================================================
+  // Floating recording overlay
+  //   A shadow-DOM pill pinned to the top of the page while recording,
+  //   with a live timer and a Stop button. Driven by messages from the
+  //   background service worker (SHOW_OVERLAY / HIDE_OVERLAY / TICK_OVERLAY).
+  // ================================================================
+  let overlayHost = null;
+  let overlayTimerEl = null;
+  let overlayStopBtn = null;
+  let overlayStartedAt = 0;
+  let overlayInterval = null;
+
+  function fmtElapsed(ms) {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    const mm = Math.floor(s / 60);
+    const ss = s % 60;
+    return mm + ':' + String(ss).padStart(2, '0');
+  }
+
+  function showOverlay(startedAt) {
+    if (overlayHost) return;
+    overlayStartedAt = startedAt || Date.now();
+
+    overlayHost = document.createElement('div');
+    overlayHost.setAttribute('data-snapcap-overlay', '');
+    overlayHost.style.cssText =
+      'all: initial; position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 2147483647;';
+
+    const root = overlayHost.attachShadow({ mode: 'open' });
+    root.innerHTML =
+      '<style>' +
+      ':host { all: initial; }' +
+      '.bar { display: inline-flex; align-items: center; gap: 10px; padding: 8px 12px; background: #0b0d12; color: #e6e9ef; border: 1px solid #22283a; border-radius: 999px; font: 13px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; box-shadow: 0 6px 24px rgba(0,0,0,0.35); user-select: none; }' +
+      '.brand { font-weight: 700; letter-spacing: .2px; } .brand b { color: #ff4d7e; }' +
+      '.dot { width: 8px; height: 8px; border-radius: 50%; background: #ff4d7e; animation: pulse 1s infinite ease-in-out; }' +
+      '.timer { font-variant-numeric: tabular-nums; color: #9aa3b2; min-width: 34px; text-align: center; }' +
+      'button { background: #ff4d7e; color: #1a0914; border: 0; border-radius: 6px; padding: 6px 12px; font: inherit; font-weight: 600; cursor: pointer; }' +
+      'button:disabled { background: #22283a; color: #9aa3b2; cursor: default; }' +
+      'button:hover:not(:disabled) { filter: brightness(1.08); }' +
+      '@keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .4; transform: scale(1.5); } }' +
+      '</style>' +
+      '<div class="bar" role="status" aria-live="polite">' +
+      '<span class="dot" aria-hidden="true"></span>' +
+      '<span class="brand">Snap<b>Cap</b></span>' +
+      '<span class="timer" id="t">0:00</span>' +
+      '<button id="stop">Stop</button>' +
+      '</div>';
+
+    (document.documentElement || document.body).appendChild(overlayHost);
+    overlayTimerEl = root.getElementById('t');
+    overlayStopBtn = root.getElementById('stop');
+    overlayStopBtn.addEventListener('click', () => {
+      if (!overlayStopBtn) return;
+      overlayStopBtn.disabled = true;
+      overlayStopBtn.textContent = 'Saving…';
+      try {
+        chrome.runtime.sendMessage({ action: 'OVERLAY_STOP' }).catch(() => {});
+      } catch (e) {}
+    });
+
+    const tick = () => {
+      if (overlayTimerEl) overlayTimerEl.textContent = fmtElapsed(Date.now() - overlayStartedAt);
+    };
+    tick();
+    overlayInterval = setInterval(tick, 500);
+  }
+
+  function hideOverlay() {
+    if (overlayInterval != null) {
+      clearInterval(overlayInterval);
+      overlayInterval = null;
+    }
+    if (overlayHost) {
+      overlayHost.remove();
+      overlayHost = null;
+      overlayTimerEl = null;
+      overlayStopBtn = null;
+    }
+  }
+
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (!message) return false;
+    if (message.action === 'SHOW_OVERLAY') {
+      showOverlay(message.startedAt);
+      sendResponse({ ok: true });
+      return false;
+    }
+    if (message.action === 'HIDE_OVERLAY') {
+      hideOverlay();
+      sendResponse({ ok: true });
+      return false;
+    }
+    return false;
+  });
 })();

@@ -310,7 +310,17 @@ async function syncToDashboard() {
     const s = $('syncStatus');
     if (result.success) {
       if (btn) btn.textContent = 'Synced';
-      if (s) { s.textContent = 'Uploaded to dashboard.'; setTimeout(() => { s.textContent = ''; }, 4000); }
+      // Store the remote id so the "View on Dashboard" button can link to it.
+      const remoteId = result.recordingId;
+      if (remoteId) {
+        await chrome.storage.local.set({ [`remote-${currentRecordingId}`]: remoteId });
+      }
+      if (s) { s.textContent = 'Uploaded — opening dashboard…'; }
+      // Deep-link straight into the dashboard's recording viewer.
+      if (remoteId && settings.serverUrl) {
+        const base = settings.serverUrl.replace(/\/$/, '');
+        chrome.tabs.create({ url: `${base}/recordings/${remoteId}` });
+      }
     } else {
       if (btn) { btn.textContent = 'Sync to Dashboard'; btn.disabled = false; }
       if (s) { s.textContent = `Failed: ${result.error}`; setTimeout(() => { s.textContent = ''; }, 4000); }

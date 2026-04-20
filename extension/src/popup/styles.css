@@ -1,0 +1,86 @@
+:root {
+  color-scheme: light dark;
+  --bg: #0b0d12;
+  --fg: #e6e9ef;
+  --muted: #9aa3b2;
+  --panel: #151922;
+  --panel-border: #22283a;
+  --accent: #ff4d7e;
+  --accent-fg: #1a0914;
+  --error: #ff6b6b;
+  --ok: #6bdd8f;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  width: 360px;
+  min-height: 180px;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13.5px/1.45 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+.app { padding: 14px; }
+.brand { font-weight: 700; letter-spacing: 0.2px; font-size: 15px; margin-bottom: 10px; }
+.brand span { color: var(--accent); }
+.muted { color: var(--muted); }
+.row { display: flex; gap: 8px; align-items: center; }
+.stack { display: flex; flex-direction: column; gap: 8px; }
+label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
+input, select, button {
+  font: inherit;
+  color: inherit;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  width: 100%;
+}
+input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+button.primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: transparent;
+  font-weight: 600;
+  cursor: pointer;
+}
+button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+button.ghost {
+  background: transparent;
+  color: var(--muted);
+  border-color: var(--panel-border);
+  cursor: pointer;
+  padding: 6px 10px;
+  width: auto;
+}
+button.ghost:hover { color: var(--fg); border-color: var(--fg); }
+.error { color: var(--error); font-size: 12px; min-height: 16px; }
+.success { color: var(--ok); font-size: 12px; }
+.link {
+  color: var(--accent);
+  word-break: break-all;
+  background: var(--panel);
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--panel-border);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  display: block;
+  text-decoration: none;
+}
+.link:hover { border-color: var(--accent); }
+.tiny { font-size: 11.5px; }
+.divider { height: 1px; background: var(--panel-border); margin: 10px 0; }
+.footer { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+.spinner {
+  display: inline-block;
+  width: 12px; height: 12px;
+  border: 2px solid var(--panel-border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(1.4); }
+}

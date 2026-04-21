@@ -21,6 +21,7 @@ export function renderJamGallery(jams: Array<{
   createdBy: { name: string | null; email: string };
   workspace: { name: string };
   _thumbnailAssetId: string | null;
+  _thumbnailKind: string | null;
 }>): string {
   const env = loadEnv();
   const esc = (s: string | null | undefined): string =>
@@ -63,9 +64,15 @@ export function renderJamGallery(jams: Array<{
         j.type === 'VIDEO'
           ? `<div class="badge video">▶ ${esc(fmtDuration(j.durationMs))}</div>`
           : `<div class="badge shot">📸</div>`;
-      const tileMedia = thumbSrc
-        ? `<img class="thumb" src="${thumbSrc}" alt="${title}"/>`
-        : `<div class="thumb placeholder">${j.type === 'VIDEO' ? '▶' : '📸'}</div>`;
+      let tileMedia: string;
+      if (thumbSrc && j._thumbnailKind === 'video') {
+        // Show video element for video thumbnails
+        tileMedia = `<video class="thumb" src="${thumbSrc}" muted preload="metadata"></video>`;
+      } else if (thumbSrc) {
+        tileMedia = `<img class="thumb" src="${thumbSrc}" alt="${title}"/>`;
+      } else {
+        tileMedia = `<div class="thumb placeholder">${j.type === 'VIDEO' ? '▶' : '📸'}</div>`;
+      }
 
       return `
         <a class="card" href="${url}">

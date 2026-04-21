@@ -42,15 +42,15 @@ interface Session {
 let session: Session | null = null;
 
 function pickMime(): string {
-  const candidates = [
-    'video/webm;codecs=vp9,opus',
-    'video/webm;codecs=vp8,opus',
-    'video/webm;codecs=vp9',
-    'video/webm;codecs=vp8',
-    'video/webm',
-  ];
-  for (const m of candidates) if (MediaRecorder.isTypeSupported(m)) return m;
-  return 'video/webm';
+  // Use the simplest supported format for maximum compatibility.
+  // Avoid complex codec strings that can cause demuxer issues.
+  if (MediaRecorder.isTypeSupported('video/webm')) {
+    return 'video/webm';
+  }
+  if (MediaRecorder.isTypeSupported('video/mp4')) {
+    return 'video/mp4';
+  }
+  return '';
 }
 
 type ChromeMandatory = {
@@ -180,6 +180,10 @@ async function start(msg: StartMsg): Promise<void> {
   ]);
 
   const mimeType = pickMime();
+  console.log('[veloqa/offscreen] using mimeType:', mimeType);
+  console.log('[veloqa/offscreen] video tracks:', combined.getVideoTracks().length);
+  console.log('[veloqa/offscreen] audio tracks:', combined.getAudioTracks().length);
+
   const recorder = new MediaRecorder(combined, {
     mimeType,
     videoBitsPerSecond: 2_000_000,
@@ -188,11 +192,12 @@ async function start(msg: StartMsg): Promise<void> {
   const chunks: Blob[] = [];
 
   recorder.ondataavailable = (e) => {
+    console.log('[veloqa/offscreen] ondataavailable:', e.data.size, 'bytes');
     if (e.data.size) chunks.push(e.data);
   };
 
   recorder.onerror = (e) => {
-    const err = (e as MediaRecorderErrorEvent).error;
+    const err = (e as ErrorEvent).error;
     void chrome.runtime.sendMessage({
       target: 'bg',
       kind: 'recorder-error',
@@ -212,42 +217,26 @@ async function start(msg: StartMsg): Promise<void> {
         chunkCount: chunks.length,
         chunkSizes: chunks.map((c) => c.size),
         mime: s.mimeType,
+        firstChunkType: chunks[0]?.type,
       });
-      const raw = new Blob(chunks, { type: s.mimeType });
+
+      // Use the actual MIME type from the first chunk if available,
+      // as MediaRecorder may use a different format than requested.
+      const actualMime = chunks[0]?.type || s.mimeType || 'video/webm';
+      console.log('[veloqa/offscreen] using actualMime:', actualMime);
+
+      const raw = new Blob(chunks, { type: actualMime });
       const durationMs = Date.now() - s.startedAt;
 
-      // Patch the Duration element in the EBML header. MediaRecorder emits
-      // WebMs without this field, which makes video players (including
-      // Chrome's own <video>) report duration: Infinity, disabling seeking.
-      // fix-webm-duration walks the EBML tree and writes a proper Duration.
-      let fixed: Blob;
-      try {
-        const mod = await import('fix-webm-duration');
-        const fixer = (mod as { default?: unknown }).default ?? mod;
-        fixed = await new Promise<Blob>((resolve, reject) => {
-          try {
-            (fixer as (b: Blob, d: number, cb: (out: Blob) => void) => void)(
-              raw,
-              durationMs,
-              (out) => resolve(out),
-            );
-          } catch (err) {
-            reject(err);
-          }
-        });
-        console.log('[veloqa/offscreen] duration patched', fixed.size);
-      } catch (err) {
-        console.warn('[veloqa/offscreen] duration patch failed, using raw', err);
-        fixed = raw;
-      }
+      console.log('[veloqa/offscreen] raw blob size:', raw.size, 'type:', raw.type);
 
-      const dataUrl = await blobToDataUrl(fixed);
+      const dataUrl = await blobToDataUrl(raw);
       await chrome.runtime.sendMessage({
         target: 'bg',
         kind: 'recorded',
         dataUrl,
         durationMs,
-        bytes: fixed.size,
+        bytes: raw.size,
         ...(s.note ? { note: s.note } : {}),
       } satisfies RecordedMsg);
     } catch (err) {
@@ -275,21 +264,28 @@ async function start(msg: StartMsg): Promise<void> {
     mimeType,
     ...(note ? { note } : {}),
   };
-  // IMPORTANT: no timeslice. MediaRecorder chunks from `start(timeslice)`
-  // are NOT safely concatenable into a valid WebM — you get a container
-  // whose demuxer rejects on playback (DEMUXER_ERROR_COULD_NOT_OPEN).
-  // Starting without a timeslice makes the recorder emit one complete
-  // WebM on stop.
+
+  // Start without timeslice - this produces a single complete WebM on stop.
+  // Timeslice mode produces chunks that aren't independently valid WebM files.
   recorder.start();
+  console.log('[veloqa/offscreen] recorder started (no timeslice)');
 }
 
 function stop(): void {
+  console.log('[veloqa/offscreen] stop called, session:', !!session);
   if (!session) return;
+  console.log('[veloqa/offscreen] recorder state:', session.recorder.state);
   if (session.recorder.state !== 'inactive') {
     // Force the recorder to flush its current buffer before stop so the
     // final WebM is complete even for very short recordings.
-    try { session.recorder.requestData(); } catch {}
+    try {
+      session.recorder.requestData();
+      console.log('[veloqa/offscreen] requestData called');
+    } catch (e) {
+      console.log('[veloqa/offscreen] requestData failed:', e);
+    }
     session.recorder.stop();
+    console.log('[veloqa/offscreen] stop called on recorder');
   }
 }
 

@@ -13,9 +13,9 @@ import * as authService from './service.js';
 
 export const authRoutes: FastifyPluginAsync = async (app) => {
   const sessionCtx = (req: { headers: Record<string, string | string[] | undefined>; ip: string }) => ({
-    userAgent: Array.isArray(req.headers['user-agent'])
+    userAgent: (Array.isArray(req.headers['user-agent'])
       ? req.headers['user-agent'][0]
-      : req.headers['user-agent'],
+      : req.headers['user-agent']) ?? 'unknown',
     ip: req.ip,
   });
 

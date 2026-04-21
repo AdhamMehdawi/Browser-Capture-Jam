@@ -5,14 +5,39 @@ import type { AuthState } from '../types.js';
 
 type View = 'loading' | 'auth' | 'ready';
 
-async function bootstrapDemo(): Promise<AuthState> {
-  const res = await api.demoLogin();
-  await setAuth({
-    accessToken: res.accessToken,
-    user: { id: '', email: '', name: null },
-    workspaces: [],
-    activeWorkspaceId: '',
-  });
+/**
+ * Validate an API key and create an auth state from it.
+ * This is the primary authentication method for the dashboard integration.
+ */
+async function bootstrapWithApiKey(apiKey: string): Promise<AuthState> {
+  const user = await api.verifyApiKey(apiKey);
+  const next: AuthState = {
+    accessToken: apiKey, // Use API key as the access token
+    user: { id: user.userId, email: user.email ?? '', name: user.name },
+    workspaces: [{ id: 'default', slug: 'default', name: 'My Recordings', role: 'owner' }],
+    activeWorkspaceId: 'default',
+  };
+  await setAuth(next);
+  return next;
+}
+
+/**
+ * Validate existing API key auth on startup.
+ */
+async function validateExistingAuth(stored: AuthState): Promise<AuthState> {
+  // If the token looks like an API key (sc_...), verify it
+  if (stored.accessToken.startsWith('sc_')) {
+    const user = await api.verifyApiKey(stored.accessToken);
+    const next: AuthState = {
+      accessToken: stored.accessToken,
+      user: { id: user.userId, email: user.email ?? '', name: user.name },
+      workspaces: [{ id: 'default', slug: 'default', name: 'My Recordings', role: 'owner' }],
+      activeWorkspaceId: 'default',
+    };
+    await setAuth(next);
+    return next;
+  }
+  // Legacy auth - try to use the old /me endpoint
   const me = await api.me();
   const workspaces = me.user.memberships.map((m) => ({
     id: m.workspace.id,
@@ -20,66 +45,37 @@ async function bootstrapDemo(): Promise<AuthState> {
     name: m.workspace.name,
     role: m.role,
   }));
-  if (!workspaces.length) throw new Error('No workspace');
+  const active =
+    stored.activeWorkspaceId && workspaces.some((w) => w.id === stored.activeWorkspaceId)
+      ? stored.activeWorkspaceId
+      : workspaces[0]?.id;
+  if (!active) throw new Error('no workspace');
   const next: AuthState = {
-    accessToken: res.accessToken,
+    accessToken: stored.accessToken,
     user: { id: me.user.id, email: me.user.email, name: me.user.name },
     workspaces,
-    activeWorkspaceId: workspaces[0]!.id,
+    activeWorkspaceId: active,
   };
   await setAuth(next);
   return next;
 }
 
+// Hardcoded demo auth for local development - no login required
+const DEMO_AUTH: AuthState = {
+  accessToken: 'demo_token',
+  user: { id: 'demo_user', email: 'mo@menatal.com', name: 'Mohammad Makhamreh' },
+  workspaces: [{ id: 'default', slug: 'default', name: 'My Workspace', role: 'owner' }],
+  activeWorkspaceId: 'default',
+};
+
 export function App() {
-  const [view, setView] = useState<View>('loading');
-  const [auth, setAuthState] = useState<AuthState | null>(null);
+  const [view, setView] = useState<View>('ready');
+  const [auth, setAuthState] = useState<AuthState | null>(DEMO_AUTH);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void (async () => {
-      const stored = await getAuth();
-      if (!stored) {
-        try {
-          setAuthState(await bootstrapDemo());
-          setView('ready');
-        } catch {
-          setView('auth');
-        }
-        return;
-      }
-      try {
-        const me = await api.me();
-        const workspaces = me.user.memberships.map((m) => ({
-          id: m.workspace.id,
-          slug: m.workspace.slug,
-          name: m.workspace.name,
-          role: m.role,
-        }));
-        const active =
-          stored.activeWorkspaceId && workspaces.some((w) => w.id === stored.activeWorkspaceId)
-            ? stored.activeWorkspaceId
-            : workspaces[0]?.id;
-        if (!active) throw new Error('no workspace');
-        const next: AuthState = {
-          accessToken: stored.accessToken,
-          user: { id: me.user.id, email: me.user.email, name: me.user.name },
-          workspaces,
-          activeWorkspaceId: active,
-        };
-        await setAuth(next);
-        setAuthState(next);
-        setView('ready');
-      } catch {
-        await clearAuth();
-        try {
-          setAuthState(await bootstrapDemo());
-          setView('ready');
-        } catch {
-          setView('auth');
-        }
-      }
-    })();
+    // Auto-save demo auth to storage so background script can use it
+    void setAuth(DEMO_AUTH);
   }, []);
 
   if (view === 'loading') {
@@ -124,10 +120,7 @@ function AuthForm({
   onDone: (a: AuthState) => void;
   initialError: string | null;
 }) {
-  const [mode, setMode] = useState<'login' | 'register'>('login');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
+  const [apiKey, setApiKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(initialError);
 
@@ -136,30 +129,11 @@ function AuthForm({
     setError(null);
     setBusy(true);
     try {
-      const res = mode === 'login'
-        ? await api.login(email, password)
-        : await api.register(email, password, name || undefined);
-      await setAuth({
-        accessToken: res.accessToken,
-        user: { id: '', email, name: null },
-        workspaces: [],
-        activeWorkspaceId: '',
-      });
-      const me = await api.me();
-      const workspaces = me.user.memberships.map((m) => ({
-        id: m.workspace.id,
-        slug: m.workspace.slug,
-        name: m.workspace.name,
-        role: m.role,
-      }));
-      if (!workspaces.length) throw new Error('No workspace available');
-      const next: AuthState = {
-        accessToken: res.accessToken,
-        user: { id: me.user.id, email: me.user.email, name: me.user.name },
-        workspaces,
-        activeWorkspaceId: workspaces[0]!.id,
-      };
-      await setAuth(next);
+      const trimmedKey = apiKey.trim();
+      if (!trimmedKey.startsWith('sc_')) {
+        throw new Error('Invalid API key format. Keys start with "sc_"');
+      }
+      const next = await bootstrapWithApiKey(trimmedKey);
       onDone(next);
     } catch (e) {
       const msg = e instanceof ApiError ? e.message : e instanceof Error ? e.message : 'Failed';
@@ -172,56 +146,28 @@ function AuthForm({
   return (
     <div className="app">
       <div className="brand">Open<span>Jam</span></div>
-      <p className="muted tiny">
-        {mode === 'login' ? 'Sign in to capture' : 'Create an account'}
-      </p>
+      <p className="muted tiny">Enter your API key to start capturing</p>
       <form className="stack" onSubmit={submit}>
-        {mode === 'register' && (
-          <div>
-            <label>Name</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
-          </div>
-        )}
         <div>
-          <label>Email</label>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="email"
-            required
-          />
-        </div>
-        <div>
-          <label>Password</label>
+          <label>API Key</label>
           <input
             type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-            minLength={10}
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="sc_..."
+            autoComplete="off"
             required
           />
         </div>
-        <button className="primary" disabled={busy} type="submit">
-          {busy ? <span className="spinner" /> : mode === 'login' ? 'Sign in' : 'Create account'}
+        <button className="primary" disabled={busy || !apiKey.trim()} type="submit">
+          {busy ? <span className="spinner" /> : 'Connect'}
         </button>
         <div className="error">{error}</div>
       </form>
       <div className="footer">
         <span className="tiny muted">
-          {mode === 'login' ? 'New here?' : 'Have an account?'}
+          Get your API key from the dashboard Settings page
         </span>
-        <button
-          className="ghost tiny"
-          type="button"
-          onClick={() => {
-            setError(null);
-            setMode(mode === 'login' ? 'register' : 'login');
-          }}
-        >
-          {mode === 'login' ? 'Create account' : 'Sign in'}
-        </button>
       </div>
     </div>
   );

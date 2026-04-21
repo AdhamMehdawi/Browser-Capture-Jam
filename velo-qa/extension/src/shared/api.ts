@@ -67,6 +67,33 @@ export const api = {
       };
     }>('/auth/me');
   },
+  /**
+   * Verify an API key and get user info.
+   * Used for authentication with the dashboard's API key system.
+   */
+  verifyApiKey(apiKey: string) {
+    return request<{ userId: string; email: string | null; name: string | null }>(
+      '/auth/verify-api-key',
+      {
+        method: 'POST',
+        body: JSON.stringify({ apiKey }),
+        auth: false,
+      }
+    );
+  },
+  /**
+   * Get current user profile using API key auth.
+   */
+  meWithApiKey() {
+    return request<{
+      userId: string;
+      email: string | null;
+      firstName: string | null;
+      lastName: string | null;
+      totalRecordings: number;
+      apiKeyPreview: string | null;
+    }>('/me');
+  },
   createJam(input: unknown) {
     return request<{ id: string; url: string }>('/jams', {
       method: 'POST',

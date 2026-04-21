@@ -134,12 +134,13 @@ export async function listPublicJams(limit = 100) {
     take: limit,
   });
   return jams.map((j) => {
-    // Prefer an explicit thumbnail, then a screenshot, then nothing.
+    // Prefer an explicit thumbnail, then a screenshot, then video for preview.
     const thumb =
       j.assets.find((a) => a.kind === 'thumbnail') ??
-      j.assets.find((a) => a.kind === 'screenshot');
+      j.assets.find((a) => a.kind === 'screenshot') ??
+      j.assets.find((a) => a.kind === 'video');
     const { assets: _omit, ...rest } = j;
-    return { ...rest, _thumbnailAssetId: thumb?.id ?? null };
+    return { ...rest, _thumbnailAssetId: thumb?.id ?? null, _thumbnailKind: thumb?.kind ?? null };
   });
 }
 

@@ -1,0 +1,193 @@
+// Velo QA — Prisma schema (Phase 1: auth + workspaces)
+//
+// Tables beyond this phase (Jam, JamAsset, Comment, Integration) will be
+// added in Phase 2. Keeping this file scoped to what Phase 1 exercises so
+// migrations stay small and reviewable.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  emailVerifiedAt DateTime?
+  passwordHash    String?
+  name            String?
+  avatarUrl       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  memberships        Membership[]
+  invitesSent        Invite[]             @relation("InviteInviter")
+  refreshTokens      RefreshToken[]
+  apiKeys            ApiKey[]
+  emailVerifications EmailVerification[]
+  jams               Jam[]
+
+  @@index([email])
+}
+
+model Workspace {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships Membership[]
+  invites     Invite[]
+  apiKeys     ApiKey[]
+  jams        Jam[]
+}
+
+enum JamType {
+  SCREENSHOT
+  VIDEO
+}
+
+enum JamVisibility {
+  PUBLIC
+  WORKSPACE
+}
+
+model Jam {
+  id          String        @id @default(cuid())
+  workspaceId String
+  createdById String
+  type        JamType
+  title       String?
+  pageUrl     String
+  pageTitle   String?
+  referrer    String?
+  device      Json
+  console     Json          // CaptureLog[]
+  network     Json          // CaptureRequest[]
+  actions     Json?         // CaptureAction[]
+  durationMs  Int?
+  visibility  JamVisibility @default(PUBLIC)
+  createdAt   DateTime      @default(now())
+
+  workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User       @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  assets    JamAsset[]
+
+  @@index([workspaceId, createdAt])
+  @@index([createdById])
+}
+
+model JamAsset {
+  id          String   @id @default(cuid())
+  jamId       String
+  kind        String // "screenshot" | "video" | "thumbnail" | "dom"
+  contentType String
+  bytes       Int
+  data        Bytes // Inlined for MVP; Phase 2.1 moves to MinIO with pre-signed URLs.
+  createdAt   DateTime @default(now())
+
+  jam Jam @relation(fields: [jamId], references: [id], onDelete: Cascade)
+
+  @@index([jamId])
+}
+
+model Membership {
+  id          String   @id @default(cuid())
+  userId      String
+  workspaceId String
+  role        Role     @default(MEMBER)
+  createdAt   DateTime @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+  @@index([workspaceId])
+}
+
+model Invite {
+  id          String       @id @default(cuid())
+  workspaceId String
+  email       String
+  role        Role         @default(MEMBER)
+  tokenHash   String       @unique
+  status      InviteStatus @default(PENDING)
+  invitedById String
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  createdAt   DateTime     @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitedBy User      @relation("InviteInviter", fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, email])
+}
+
+model RefreshToken {
+  id         String    @id @default(cuid())
+  userId     String
+  tokenHash  String    @unique
+  // Rotation chain — lets us detect replay of a revoked token and invalidate
+  // the whole family (see docs/ASSUMPTIONS.md A9).
+  familyId   String
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  replacedBy String?
+  userAgent  String?
+  ip         String?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+}
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  workspaceId String
+  userId      String
+  name        String
+  keyHash     String    @unique
+  keyPrefix   String
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+model EmailVerification {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  purpose   String    // "verify_email" | "reset_password"
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+}

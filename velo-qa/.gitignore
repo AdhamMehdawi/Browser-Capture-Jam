@@ -1,0 +1,39 @@
+# deps
+node_modules
+.pnpm-store
+
+# build outputs
+dist
+build
+.next
+out
+coverage
+*.tsbuildinfo
+
+# env
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# editor
+.vscode
+.idea
+.DS_Store
+
+# prisma
+server/prisma/*.db
+server/prisma/*.db-journal
+
+# extension
+extension/.output
+extension/web-ext-artifacts
+
+# misc
+.turbo
+.cache

@@ -14,13 +14,13 @@ import type { ReactNode } from 'react';
 import { createContext, useContext } from 'react';
 
 const FAKE_USER = {
-  id: 'user_demo',
-  firstName: 'Demo',
-  lastName: 'User',
-  fullName: 'Demo User',
+  id: 'demo_user_001',
+  firstName: 'Mohammad',
+  lastName: 'Makhamreh',
+  fullName: 'Mohammad Makhamreh',
   imageUrl: '',
-  primaryEmailAddress: { emailAddress: 'demo@example.com' },
-  emailAddresses: [{ emailAddress: 'demo@example.com' }],
+  primaryEmailAddress: { emailAddress: 'mo@menatal.com' },
+  emailAddresses: [{ emailAddress: 'mo@menatal.com' }],
 };
 
 interface ClerkCtx {
@@ -124,7 +124,7 @@ export function UserButton(_props: Record<string, unknown>) {
       width: 32, height: 32, borderRadius: '50%', background: '#ff4d7e',
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       color: '#1a0914', fontWeight: 700, fontSize: 13,
-    }} title="Demo User">D</div>
+    }} title="Mohammad Makhamreh">M</div>
   );
 }
 

@@ -33,8 +33,10 @@ type BgState =
       tabId: number;
       windowId: number;
       mode: RecordMode;
+      /** Context captured at the start of recording - we'll merge with end context. */
+      startContext: CapturePayload | null;
     }
-  | { kind: 'processing'; workspaceId: string }
+  | { kind: 'processing'; workspaceId: string; startContext: CapturePayload | null }
   /**
    * Recording finished, blob captured, user hasn't decided yet. Data lives
    * in memory until they click Upload or Discard in the preview modal.
@@ -47,6 +49,8 @@ type BgState =
       durationMs: number;
       bytes: number;
       note?: string;
+      /** Context captured during recording - merged start + end. */
+      capturedContext: CapturePayload | null;
     };
 
 let state: BgState = { kind: 'idle' };
@@ -356,6 +360,23 @@ async function handleRecordStart(req: RecordStartReq): Promise<BgResponse> {
     }
 
     const startedAt = Date.now();
+
+    // Capture context at the START of recording so we have console/network
+    // events that occurred before the user clicked stop. This is critical
+    // because the buffers get cleared on page navigation.
+    let startContext: CapturePayload | null = null;
+    try {
+      const ctxResult = await requestContext(tab.id);
+      startContext = ctxResult.payload;
+      console.log('[veloqa/bg] captured start context', {
+        consoleCount: startContext.console.length,
+        networkCount: startContext.network.length,
+        actionsCount: startContext.actions.length,
+      });
+    } catch (e) {
+      console.warn('[veloqa/bg] failed to capture start context', e);
+    }
+
     state = {
       kind: 'recording',
       startedAt,
@@ -363,6 +384,7 @@ async function handleRecordStart(req: RecordStartReq): Promise<BgResponse> {
       tabId: tab.id,
       windowId: tab.windowId,
       mode: req.mode,
+      startContext,
     };
     console.log('[veloqa/bg] state=recording');
     // Inject the floating recording bar on whatever tab the user was on —
@@ -396,7 +418,7 @@ async function handleRecordStop(): Promise<BgResponse> {
     return { ok: false, code: 'not_recording', message: 'Not currently recording' };
   }
   const prev = state;
-  state = { kind: 'processing', workspaceId: prev.workspaceId };
+  state = { kind: 'processing', workspaceId: prev.workspaceId, startContext: prev.startContext };
   pendingResult = null;
   await chrome.runtime.sendMessage({ target: 'offscreen', kind: 'stop' });
 
@@ -428,8 +450,64 @@ async function onRecordedFromOffscreen(msg: {
       return;
     }
     const workspaceId = state.workspaceId;
+    const startContext = state.startContext;
     const tab = await activeTab().catch(() => null);
     const tabId = tab?.id ?? null;
+
+    // Capture end context and merge with start context
+    let capturedContext: CapturePayload | null = null;
+    if (tabId != null) {
+      try {
+        const endCtxResult = await requestContext(tabId);
+        const endContext = endCtxResult.payload;
+        console.log('[veloqa/bg] captured end context', {
+          consoleCount: endContext.console.length,
+          networkCount: endContext.network.length,
+          actionsCount: endContext.actions.length,
+        });
+
+        // Merge start and end contexts - dedupe by timestamp
+        if (startContext) {
+          const mergedConsole = [...startContext.console];
+          const seenConsoleTs = new Set(mergedConsole.map((c) => c.timestamp));
+          for (const c of endContext.console) {
+            if (!seenConsoleTs.has(c.timestamp)) mergedConsole.push(c);
+          }
+
+          const mergedNetwork = [...startContext.network];
+          const seenNetworkIds = new Set(mergedNetwork.map((n) => n.id));
+          for (const n of endContext.network) {
+            if (!seenNetworkIds.has(n.id)) mergedNetwork.push(n);
+          }
+
+          const mergedActions = [...startContext.actions];
+          const seenActionTs = new Set(mergedActions.map((a) => a.timestamp));
+          for (const a of endContext.actions) {
+            if (!seenActionTs.has(a.timestamp)) mergedActions.push(a);
+          }
+
+          capturedContext = {
+            console: mergedConsole,
+            network: mergedNetwork,
+            actions: mergedActions,
+            device: endContext.device,
+            page: endContext.page,
+          };
+          console.log('[veloqa/bg] merged context', {
+            consoleCount: capturedContext.console.length,
+            networkCount: capturedContext.network.length,
+            actionsCount: capturedContext.actions.length,
+          });
+        } else {
+          capturedContext = endContext;
+        }
+      } catch (e) {
+        console.warn('[veloqa/bg] failed to capture end context', e);
+        capturedContext = startContext;
+      }
+    } else {
+      capturedContext = startContext;
+    }
 
     state = {
       kind: 'pending-preview',
@@ -438,6 +516,7 @@ async function onRecordedFromOffscreen(msg: {
       dataUrl: msg.dataUrl,
       durationMs: msg.durationMs,
       bytes: msg.bytes,
+      capturedContext,
       ...(msg.note ? { note: msg.note } : {}),
     };
 
@@ -481,7 +560,7 @@ async function onRecordedFromOffscreen(msg: {
 
 /**
  * User clicked Upload in the preview modal. Package the buffered dataUrl
- * with the current tab's context and POST to /jams.
+ * with the captured context (collected at start + end of recording) and POST to /jams.
  */
 async function uploadPendingPreview(req: { title?: string }): Promise<BgResponse> {
   if (state.kind !== 'pending-preview') {
@@ -489,12 +568,15 @@ async function uploadPendingPreview(req: { title?: string }): Promise<BgResponse
   }
   const pending = state;
   try {
-    const tab = await activeTab().catch(() => null);
-    const ctx = tab?.id
-      ? await requestContext(tab.id)
-          .then((r) => r.payload)
-          .catch(() => fallbackContext(tab))
-      : fallbackContext({ url: '', title: '' } as chrome.tabs.Tab);
+    // Use the context we captured during recording, not fresh context
+    // (user may have navigated away, reloaded, etc.)
+    const ctx = pending.capturedContext ?? fallbackContext({ url: '', title: '' } as chrome.tabs.Tab);
+
+    console.log('[veloqa/bg] uploadPendingPreview: using captured context', {
+      consoleCount: ctx.console.length,
+      networkCount: ctx.network.length,
+      actionsCount: ctx.actions.length,
+    });
 
     const jam = await api.createJam({
       workspaceId: pending.workspaceId,

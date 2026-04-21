@@ -1,14 +1,28 @@
-import { getAuth } from "@clerk/express";
 import type { Request, Response, NextFunction } from "express";
 import { db } from "@workspace/db";
 import { usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+
+// Mock mode for local development (no Clerk required)
+const MOCK_AUTH = !process.env.CLERK_SECRET_KEY || process.env.MOCK_AUTH === "true";
+
+// Try to import Clerk, but don't fail if it's not configured
+let getAuth: ((req: Request) => { userId?: string | null } | null) | null = null;
+if (!MOCK_AUTH) {
+  try {
+    const clerk = await import("@clerk/express");
+    getAuth = clerk.getAuth;
+  } catch {
+    console.warn("[auth] Clerk not available, using mock auth");
+  }
+}
 
 /**
  * Resolves the authenticated user id from either:
  *   1. A Clerk session (cookie-based, used by the dashboard)
  *   2. An `Authorization: Bearer sc_...` API key (used by the Chrome
  *      extension and any other programmatic client)
+ *   3. Mock auth for local development (demo_user_001)
  *
  * The api-zod user route generates these keys, the usersTable persists
  * them, and this middleware is the one place that maps either credential
@@ -20,22 +34,34 @@ import { eq } from "drizzle-orm";
  * of our keys.
  */
 async function resolveUserId(req: Request): Promise<string | null> {
-  const clerkUserId = getAuth(req)?.userId;
-  if (clerkUserId) return clerkUserId;
+  // Try Clerk auth first (if available)
+  if (getAuth) {
+    const clerkUserId = getAuth(req)?.userId;
+    if (clerkUserId) return clerkUserId;
+  }
 
+  // Check for API key auth
   const header = req.headers["authorization"];
-  if (typeof header !== "string" || !header.startsWith("Bearer ")) return null;
-  const token = header.slice("Bearer ".length).trim();
-  // Only treat strings we actually minted (`sc_` prefix from user.ts) as
-  // candidates. Anything else is presumably a Clerk JWT handled elsewhere.
-  if (!token.startsWith("sc_") || token.length < 16) return null;
+  if (typeof header === "string" && header.startsWith("Bearer ")) {
+    const token = header.slice("Bearer ".length).trim();
+    // Only treat strings we actually minted (`sc_` prefix from user.ts) as
+    // candidates. Anything else is presumably a Clerk JWT handled elsewhere.
+    if (token.startsWith("sc_") && token.length >= 16) {
+      const rows = await db
+        .select({ id: usersTable.id })
+        .from(usersTable)
+        .where(eq(usersTable.apiKey, token))
+        .limit(1);
+      if (rows[0]?.id) return rows[0].id;
+    }
+  }
 
-  const rows = await db
-    .select({ id: usersTable.id })
-    .from(usersTable)
-    .where(eq(usersTable.apiKey, token))
-    .limit(1);
-  return rows[0]?.id ?? null;
+  // Mock auth for local development - allow unauthenticated requests
+  if (MOCK_AUTH) {
+    return "demo_user_001";
+  }
+
+  return null;
 }
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {

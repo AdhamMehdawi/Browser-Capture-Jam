@@ -87,10 +87,12 @@ export async function getWorkspace(userId: string, workspaceId: string) {
 export async function updateWorkspace(
   userId: string,
   workspaceId: string,
-  patch: { name?: string },
+  patch: { name?: string | undefined },
 ) {
   await requireMembership(workspaceId, userId, 'ADMIN');
-  return prisma.workspace.update({ where: { id: workspaceId }, data: patch });
+  const data: { name?: string } = {};
+  if (patch.name !== undefined) data.name = patch.name;
+  return prisma.workspace.update({ where: { id: workspaceId }, data });
 }
 
 export async function deleteWorkspace(userId: string, workspaceId: string) {

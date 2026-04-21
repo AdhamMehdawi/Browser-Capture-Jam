@@ -6,6 +6,8 @@ import { CLERK_PROXY_PATH, clerkProxyMiddleware } from "./middlewares/clerkProxy
 import router from "./routes";
 import { logger } from "./lib/logger";
 
+const MOCK_AUTH = process.env.MOCK_AUTH === "true";
+
 const app: Express = express();
 
 app.use(
@@ -28,13 +30,21 @@ app.use(
   }),
 );
 
-app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
+// Skip Clerk proxy when in mock auth mode
+if (!MOCK_AUTH) {
+  app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
+}
 
 app.use(cors({ credentials: true, origin: true }));
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
-app.use(clerkMiddleware());
+// Skip Clerk middleware when in mock auth mode
+if (!MOCK_AUTH) {
+  app.use(clerkMiddleware());
+} else {
+  logger.info("Running in MOCK_AUTH mode - Clerk authentication disabled");
+}
 
 app.use("/api", router);
 

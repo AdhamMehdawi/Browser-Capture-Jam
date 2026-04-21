@@ -31,6 +31,10 @@ window.addEventListener('message', (event) => {
   const data = event.data as { tag?: string; kind?: string; payload?: unknown } | null;
   if (!data || data.tag !== HOOK_TAG) return;
 
+  // Debug: log received events
+  // eslint-disable-next-line no-console
+  console.debug('[veloqa/content] received hook event', data.kind, data.payload);
+
   if (data.kind === 'console' || data.kind === 'error' || data.kind === 'unhandledrejection') {
     const entry = data.payload as ConsoleEntry;
     consoleBuffer.push(entry);
@@ -94,6 +98,12 @@ function masked(el: Element | null): boolean {
 void masked;
 
 function collectPayload(): CapturePayload {
+  // eslint-disable-next-line no-console
+  console.log('[veloqa/content] collectPayload called', {
+    consoleCount: consoleBuffer.length,
+    networkCount: networkBuffer.length,
+    actionsCount: actionsBuffer.length,
+  });
   return {
     console: consoleBuffer.slice(),
     network: networkBuffer.slice(),

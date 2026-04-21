@@ -1,4 +1,4 @@
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
@@ -11,10 +11,10 @@ import { authRoutes } from './modules/auth/routes.js';
 import { workspaceRoutes } from './modules/workspaces/routes.js';
 import { galleryRoutes, jamRoutes, publicBridgeRoutes, viewerRoutes } from './modules/jams/routes.js';
 
-export async function buildApp(): Promise<FastifyInstance> {
+export async function buildApp() {
   const env = loadEnv();
   const app = Fastify({
-    loggerInstance: logger,
+    logger: logger as any,
     disableRequestLogging: false,
     trustProxy: true,
   });

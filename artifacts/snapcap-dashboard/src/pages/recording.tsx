@@ -152,7 +152,7 @@ function FixedVideoPlayer({
   }, [videoUrl, knownDurationMs]);
 
   return (
-    <div className="bg-black shrink-0 relative aspect-video max-h-[40vh] border-b border-border flex items-center justify-center">
+    <div className="bg-black flex-1 relative w-full flex items-center justify-center">
       {src ? (
         <video
           src={src}
@@ -492,14 +492,17 @@ export default function RecordingViewer() {
         </div>
       </header>
 
-      {/* Main Content - Video & Logs */}
+      {/* Main Content - Video on left, Logs on right */}
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
-        {/* Left Column - Video (if available) & Log List */}
-        <div className="flex-1 flex flex-col border-r border-border min-w-0 overflow-hidden">
-          {videoUrl && (
+        {/* Left Column - Video */}
+        {videoUrl && (
+          <div className="md:w-1/2 lg:w-3/5 shrink-0 flex flex-col border-r border-border bg-black">
             <FixedVideoPlayer videoUrl={videoUrl} knownDurationMs={recording.duration} />
-          )}
+          </div>
+        )}
 
+        {/* Right Column - Log List */}
+        <div className={`flex-1 flex flex-col min-w-0 overflow-hidden ${!videoUrl ? 'w-full' : ''}`}>
           <div className="flex-1 flex flex-col bg-background min-h-0">
             <div className="p-3 border-b border-border flex items-center justify-between bg-card shrink-0 gap-4">
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">

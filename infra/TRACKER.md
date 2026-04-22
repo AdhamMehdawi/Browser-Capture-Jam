@@ -82,6 +82,17 @@ Known follow-ups (do NOT block Phase 5):
 - ✅ **Drizzle schema pushed to `velocap-pg-dev`** (`recordings`, `snapcap_users`). Verified via `psql \dt`.
 - ✅ **`GET /api/recordings` returns real data** (`{"recordings":[],"total":0,...}`) — full stack working end-to-end from ACA → Postgres.
 - ✅ Postgres admin password regenerated alphanumeric-only (previous special-char set broke URL parsing in pg driver). One-off; KV + ACA updated automatically by TF.
+- ✅ **Dashboard built + deployed to `velocap-swa-dev`**:
+  ```bash
+  cd artifacts/snapcap-dashboard
+  VITE_API_URL=https://velocap-api-dev.greenrock-0aa61fcc.uaenorth.azurecontainerapps.io \
+  VITE_CLERK_PUBLISHABLE_KEY=pk_test_placeholder \
+  PORT=3000 BASE_PATH=/ pnpm run build
+  SWA_TOKEN=$(az staticwebapp secrets list --name velocap-swa-dev --resource-group VeloCap --query properties.apiKey -o tsv)
+  npx --yes @azure/static-web-apps-cli deploy ./dist/public --deployment-token "$SWA_TOKEN" --env production --no-use-keychain
+  ```
+  Live at https://salmon-sea-0c8c28b03.7.azurestaticapps.net (HTTP 200, serves HTML+JS+CSS).
+- ⚠️ **Dashboard Clerk init will fail in-browser** until real `VITE_CLERK_PUBLISHABLE_KEY` is baked in at build time.
 - ⬜ Set Clerk keys in KV:
   `az keyvault secret set --vault-name velocap-kv-dev --name clerk-secret-key --value sk_test_...`
   `az keyvault secret set --vault-name velocap-kv-dev --name clerk-publishable-key --value pk_test_...`
@@ -121,7 +132,7 @@ Resource group **`VeloCap`** (uaenorth):
 | Postgres | `velocap-pg-dev` | B1ms, 32 GB, no HA, database `velocap`, public + Azure-services firewall rule + **tareq-laptop-temp**. Schema pushed (`recordings`, `snapcap_users`). |
 | ACA env | `velocap-cae-dev` | logs → LAW |
 | Container App | `velocap-api-dev` | image `velocapcr.azurecr.io/api-server:09d89c8-fix2`; FQDN: `velocap-api-dev.greenrock-0aa61fcc.uaenorth.azurecontainerapps.io`; `/api/healthz` returns 200 |
-| Static Web App | `velocap-swa-dev` | Free, **empty**; FQDN: `salmon-sea-0c8c28b03.7.azurestaticapps.net` (westeurope) |
+| Static Web App | `velocap-swa-dev` | Free; dashboard deployed; FQDN: `salmon-sea-0c8c28b03.7.azurestaticapps.net` (westeurope). Placeholder Clerk key baked in — in-browser auth will fail until rebuilt with real key. |
 
 Resource group **`velocap-tfstate-rg`** (uaenorth):
 
@@ -143,6 +154,7 @@ Resource group **`velocap-tfstate-rg`** (uaenorth):
 
 ## Changelog
 
+- **2026-04-22** — Dashboard built + deployed to `velocap-swa-dev` via SWA CLI. Serving HTML at https://salmon-sea-0c8c28b03.7.azurestaticapps.net. Clerk key still a placeholder — in-browser auth won't work until rebuilt with the real publishable key.
 - **2026-04-22** — Phase 5 started. Drizzle schema pushed to `velocap-pg-dev`; `GET /api/recordings` returns real data end-to-end. Postgres admin password regenerated without special chars after `random_password` default tripped URL parsing in the pg driver. Laptop firewall rule `tareq-laptop-temp` added for dev-time DB access.
 - **2026-04-22** — Phase 4 done. api-server image `09d89c8-fix2` pushed to `velocapcr`, running in `velocap-api-dev`, `/api/healthz` returning 200. Option A (SnapCap stack) locked after realizing velo-qa/server + snapcap-dashboard + velo-qa/extension mix wasn't coherent. Decision was triggered by the user sharing the "Summary Table" image.
 - **2026-04-22** — Tracker file created. Phases 0–3 marked done retroactively based on actual applied state.

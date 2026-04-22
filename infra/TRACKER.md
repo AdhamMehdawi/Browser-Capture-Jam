@@ -78,14 +78,18 @@ Known follow-ups (do NOT block Phase 5):
 - ⚠️ Drizzle schema not yet pushed to `velocap-pg-dev` — any DB-touching route returns 500.
 - ⚠️ `variables.tf` default for `api_image` must be bumped on every push (or `-var` passed) — better handled by CI in Phase 7.
 
-### Phase 5 — Dashboard + secrets + smoke test ⬜
+### Phase 5 — Dashboard + secrets + smoke test 🟨
+- ✅ **Drizzle schema pushed to `velocap-pg-dev`** (`recordings`, `snapcap_users`). Verified via `psql \dt`.
+- ✅ **`GET /api/recordings` returns real data** (`{"recordings":[],"total":0,...}`) — full stack working end-to-end from ACA → Postgres.
+- ✅ Postgres admin password regenerated alphanumeric-only (previous special-char set broke URL parsing in pg driver). One-off; KV + ACA updated automatically by TF.
 - ⬜ Set Clerk keys in KV:
   `az keyvault secret set --vault-name velocap-kv-dev --name clerk-secret-key --value sk_test_...`
   `az keyvault secret set --vault-name velocap-kv-dev --name clerk-publishable-key --value pk_test_...`
-- ⬜ Restart api-server revision to pick up new secret versions
+- ⬜ Remove `MOCK_AUTH=true` from Terraform + restart ACA revision
 - ⬜ `vite build` the dashboard with `VITE_API_URL=https://velocap-api-dev...azurecontainerapps.io`
 - ⬜ Deploy build output to `velocap-swa-dev` (SWA CLI or GitHub Action)
 - ⬜ Smoke test: log in via Clerk → dashboard loads → API `/api/me` returns 200
+- ⬜ Remove laptop Postgres firewall rule `tareq-laptop-temp` (left in place for active dev; re-add with `az postgres flexible-server firewall-rule create -g VeloCap -n velocap-pg-dev --rule-name tareq-laptop-temp --start-ip-address $(curl -s https://api.ipify.org) --end-ip-address $(curl -s https://api.ipify.org)`)
 
 ### Phase 6 — Prod env ⬜
 - ⬜ Create `infra/envs/prod/` as a near-copy of `dev/`, with `-prod` suffixes + `min_replicas = 1` on the API
@@ -114,7 +118,7 @@ Resource group **`VeloCap`** (uaenorth):
 | ACR | `velocapcr` | Basic, admin-enabled, **empty (no images pushed yet)** |
 | Key Vault | `velocap-kv-dev` | Access-policy mode; 7 secrets |
 | Storage | `velocapstdevaue01` | `assets` container created |
-| Postgres | `velocap-pg-dev` | B1ms, 32 GB, no HA, database `velocap`, public + Azure-services firewall rule |
+| Postgres | `velocap-pg-dev` | B1ms, 32 GB, no HA, database `velocap`, public + Azure-services firewall rule + **tareq-laptop-temp**. Schema pushed (`recordings`, `snapcap_users`). |
 | ACA env | `velocap-cae-dev` | logs → LAW |
 | Container App | `velocap-api-dev` | image `velocapcr.azurecr.io/api-server:09d89c8-fix2`; FQDN: `velocap-api-dev.greenrock-0aa61fcc.uaenorth.azurecontainerapps.io`; `/api/healthz` returns 200 |
 | Static Web App | `velocap-swa-dev` | Free, **empty**; FQDN: `salmon-sea-0c8c28b03.7.azurestaticapps.net` (westeurope) |
@@ -139,6 +143,7 @@ Resource group **`velocap-tfstate-rg`** (uaenorth):
 
 ## Changelog
 
+- **2026-04-22** — Phase 5 started. Drizzle schema pushed to `velocap-pg-dev`; `GET /api/recordings` returns real data end-to-end. Postgres admin password regenerated without special chars after `random_password` default tripped URL parsing in the pg driver. Laptop firewall rule `tareq-laptop-temp` added for dev-time DB access.
 - **2026-04-22** — Phase 4 done. api-server image `09d89c8-fix2` pushed to `velocapcr`, running in `velocap-api-dev`, `/api/healthz` returning 200. Option A (SnapCap stack) locked after realizing velo-qa/server + snapcap-dashboard + velo-qa/extension mix wasn't coherent. Decision was triggered by the user sharing the "Summary Table" image.
 - **2026-04-22** — Tracker file created. Phases 0–3 marked done retroactively based on actual applied state.
 - **2026-04-21** — `infra/envs/dev` applied (19 resources). Container App on placeholder image; Postgres + KV + Storage + ACR all provisioned. Commit `2f8fa9d` on branch `deployment`.

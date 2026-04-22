@@ -50,13 +50,13 @@ module "acr" {
 # -----------------------------------------------------------------------------
 resource "random_password" "postgres_admin" {
   length      = 32
-  special     = true
+  special     = false
   min_lower   = 4
   min_upper   = 4
   min_numeric = 4
-  min_special = 2
-  # Avoid characters that trip up psql connection strings / shell quoting.
-  override_special = "!#$%*+-=?"
+  # Alphanumerics only — avoids URL-encoding the whole DATABASE_URL and
+  # sidesteps shell / ORM / driver edge cases. 32 chars is still
+  # cryptographically strong (log2(62^32) ≈ 191 bits).
 }
 
 # -----------------------------------------------------------------------------

@@ -86,7 +86,7 @@ export default function Settings() {
                 Extension Integration
               </CardTitle>
               <CardDescription>
-                Your API key connects the Chrome extension to your SnapCap account.
+                Your API key connects the Chrome extension to your VeloRec account.
                 Keep this key secret and do not share it.
               </CardDescription>
             </CardHeader>
@@ -123,7 +123,7 @@ export default function Settings() {
                     <p className="font-semibold mb-1">How to setup the extension:</p>
                     <ol className="list-decimal list-inside space-y-1 ml-1 text-muted-foreground">
                       <li>Generate a new API key below</li>
-                      <li>Click the SnapCap icon in your Chrome toolbar</li>
+                      <li>Click the VeloRec icon in your Chrome toolbar</li>
                       <li>Paste the key into the settings panel</li>
                     </ol>
                   </div>

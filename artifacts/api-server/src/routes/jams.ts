@@ -3,7 +3,7 @@ import { randomUUID } from "crypto";
 import { requireAuth } from "../middlewares/requireAuth";
 import path from "path";
 import fs from "fs";
-import Database from "better-sqlite3";
+import { db, recordingsTable } from "@workspace/db";
 
 const router = Router();
 
@@ -11,12 +11,6 @@ const router = Router();
 const LOCAL_MEDIA_DIR = path.join(process.cwd(), ".data", "media");
 if (!fs.existsSync(LOCAL_MEDIA_DIR)) {
   fs.mkdirSync(LOCAL_MEDIA_DIR, { recursive: true });
-}
-
-// Get the SQLite database directly for raw queries
-function getDb() {
-  const dbPath = path.join(process.cwd(), ".data", "local.db");
-  return new Database(dbPath);
 }
 
 /**
@@ -27,9 +21,20 @@ function getDb() {
  * payload format to the dashboard's recording format.
  */
 router.post("/jams", requireAuth, async (req: any, res) => {
+  console.log("[jams] Route hit, content-length:", req.headers["content-length"], "content-type:", req.headers["content-type"]);
   try {
     const body = req.body;
     const userId = req.userId;
+
+    console.log("[jams] POST /jams received", {
+      userId,
+      hasMedia: !!body.media,
+      mediaKind: body.media?.kind,
+      dataUrlLength: body.media?.dataUrl?.length ?? 0,
+      dataUrlPrefix: body.media?.dataUrl?.slice(0, 80),
+      bodyKeys: Object.keys(body),
+      mediaKeys: body.media ? Object.keys(body.media) : [],
+    });
 
     // Transform extension events to dashboard format
     const events: any[] = [];
@@ -84,11 +89,15 @@ router.post("/jams", requireAuth, async (req: any, res) => {
     let videoObjectPath: string | null = null;
 
     if (body.media?.dataUrl) {
+      console.log("[jams] Processing media.dataUrl, length:", body.media.dataUrl.length);
       try {
-        const matches = body.media.dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+        // Match data URLs with optional parameters like codecs=vp8
+        // Format: data:video/webm;codecs=vp8;base64,DATA or data:image/png;base64,DATA
+        const matches = body.media.dataUrl.match(/^data:([^;]+)(;[^;]+)*;base64,(.+)$/);
+        console.log("[jams] Regex match result:", matches ? `matched, contentType=${matches[1]}` : "NO MATCH");
         if (matches) {
           const contentType = matches[1];
-          const base64Data = matches[2];
+          const base64Data = matches[3]; // Group 3 because group 2 captures optional params like ;codecs=vp8
           const binaryData = Buffer.from(base64Data, "base64");
 
           // Determine file extension from content type
@@ -104,58 +113,49 @@ router.post("/jams", requireAuth, async (req: any, res) => {
           const filePath = path.join(LOCAL_MEDIA_DIR, fileName);
           fs.writeFileSync(filePath, binaryData);
 
-          videoObjectPath = `/local-media/${fileName}`;
-          req.log?.info?.({ path: videoObjectPath }, "Media saved locally");
+          // Use /objects/local/ prefix so dashboard can fetch via /api/storage/local/xxx
+          videoObjectPath = `/objects/local/${fileName}`;
+          console.log("[jams] Media saved successfully:", { videoObjectPath, size: binaryData.length });
         }
       } catch (uploadErr) {
-        req.log?.warn?.({ err: uploadErr }, "Media save failed, continuing without video");
+        console.error("[jams] Media save failed:", uploadErr);
         videoObjectPath = null;
       }
+    } else {
+      console.log("[jams] No media.dataUrl in body");
     }
 
-    // Create recording in database using raw SQL (works with SQLite)
-    const db = getDb();
-    const recordingId = randomUUID().replace(/-/g, "");
+    // Create recording in database using Drizzle ORM
     const title = body.title || body.page?.title || "Untitled Recording";
     const duration = body.durationMs || 0;
     const pageUrl = body.page?.url ?? null;
     const pageTitle = body.page?.title ?? null;
-    const browserInfo = body.device ? JSON.stringify(body.device) : null;
-    const eventsJson = JSON.stringify(events);
-    const tagsJson = JSON.stringify([]);
+    const browserInfo = body.device ?? null;
 
-    const stmt = db.prepare(`
-      INSERT INTO recordings (
-        id, user_id, title, duration, page_url, page_title,
-        network_logs_count, error_count, console_count, click_count,
-        video_object_path, tags, events, browser_info
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    stmt.run(
-      recordingId,
-      userId,
-      title,
-      duration,
-      pageUrl,
-      pageTitle,
-      networkLogsCount,
-      errorCount,
-      consoleCount,
-      clickCount,
-      videoObjectPath,
-      tagsJson,
-      eventsJson,
-      browserInfo
-    );
-
-    db.close();
+    const [recording] = await db
+      .insert(recordingsTable)
+      .values({
+        userId,
+        title,
+        duration,
+        pageUrl,
+        pageTitle,
+        networkLogsCount,
+        errorCount,
+        consoleCount,
+        clickCount,
+        videoObjectPath,
+        tags: [],
+        events,
+        browserInfo,
+      })
+      .returning();
 
     // Build response URL for the dashboard
-    const dashboardUrl = `http://localhost:3000/recordings/${recordingId}`;
+    const dashboardUrl = `http://localhost:3001/recordings/${recording.id}`;
 
     res.status(201).json({
-      id: recordingId,
+      id: recording.id,
       url: dashboardUrl,
     });
   } catch (err) {

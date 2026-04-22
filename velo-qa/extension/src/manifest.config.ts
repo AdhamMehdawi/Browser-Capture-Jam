@@ -31,6 +31,13 @@ export default defineManifest({
       all_frames: false,
       world: 'MAIN',
     },
+    {
+      // Auth callback script that runs on the dashboard to pick up auth tokens
+      matches: ['http://localhost:3001/*', 'https://*.veloqa.com/*'],
+      js: ['src/content/auth-callback.ts'],
+      run_at: 'document_idle',
+      all_frames: false,
+    },
   ],
   permissions: [
     'activeTab',
@@ -43,11 +50,21 @@ export default defineManifest({
     'downloads',
   ],
   host_permissions: ['<all_urls>', 'http://localhost:4000/*'],
+  // Allow dashboard to send messages to the extension for Clerk auth callback
+  externally_connectable: {
+    matches: ['http://localhost:3001/*', 'https://*.veloqa.com/*'],
+  },
   web_accessible_resources: [
     {
       // The preview page is embedded as an iframe from content-script
       // injected modals, so it must be loadable from any origin.
-      resources: ['src/preview/index.html', 'assets/preview*.js'],
+      // Also include offscreen assets to ensure they're accessible.
+      resources: [
+        'src/preview/index.html',
+        'src/offscreen/index.html',
+        'assets/preview*.js',
+        'assets/offscreen*.js',
+      ],
       matches: ['<all_urls>'],
     },
   ],

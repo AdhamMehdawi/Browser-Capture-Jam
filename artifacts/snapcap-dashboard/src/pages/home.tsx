@@ -11,7 +11,7 @@ export default function Home() {
           <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground">
             <Video size={16} />
           </div>
-          <span className="font-bold text-xl tracking-tight">SnapCap</span>
+          <span className="font-bold text-xl tracking-tight">VeloRec</span>
         </div>
         <div className="flex gap-4">
           <Link href="/sign-in">
@@ -95,7 +95,7 @@ export default function Home() {
         <div className="max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between text-sm text-muted-foreground">
           <div className="flex items-center gap-2 mb-4 md:mb-0">
             <Video size={16} />
-            <span className="font-semibold text-foreground">SnapCap</span>
+            <span className="font-semibold text-foreground">VeloRec</span>
             <span>© {new Date().getFullYear()}</span>
           </div>
           <div className="flex gap-6">

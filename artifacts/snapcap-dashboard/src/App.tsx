@@ -10,6 +10,7 @@ import Dashboard from "@/pages/dashboard";
 import RecordingViewer from "@/pages/recording";
 import SharedRecordingViewer from "@/pages/shared";
 import Settings from "@/pages/settings";
+import ExtensionAuth from "@/pages/extension-auth";
 import Layout from "@/components/layout";
 
 const queryClient = new QueryClient();
@@ -131,7 +132,8 @@ function Router() {
       <Route path="/sign-in/*?" component={SignInPage} />
       <Route path="/sign-up/*?" component={SignUpPage} />
       <Route path="/share/:token" component={SharedRecordingViewer} />
-      
+      <Route path="/extension-auth" component={ExtensionAuth} />
+
       <Route path="/dashboard">
         <ProtectedRoute component={Dashboard} />
       </Route>

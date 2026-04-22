@@ -105,7 +105,7 @@ export function renderJamGallery(jams: Array<{
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Velo QA · Gallery</title>
+  <title>VeloRec · Gallery</title>
   <style>
     :root { color-scheme: light dark; --bg:#0b0d12; --fg:#e6e9ef; --muted:#9aa3b2; --panel:#151922; --panel-border:#22283a; --accent:#ff4d7e; }
     * { box-sizing: border-box; }
@@ -141,7 +141,7 @@ export function renderJamGallery(jams: Array<{
 </head>
 <body>
   <header>
-    <div class="brand">Open<span>Jam</span></div>
+    <div class="brand">Velo<span>Rec</span></div>
     <div class="count">${jams.length} ${jams.length === 1 ? 'jam' : 'jams'}</div>
   </header>
   <main>
@@ -252,7 +252,7 @@ export function renderJamHtml(jam: {
 <body>
   <header>
     <div>
-      <div class="brand">Open<span>Jam</span></div>
+      <div class="brand">Velo<span>Rec</span></div>
       <div class="meta">${author} · ${esc(jam.workspace.name)} · ${created}</div>
     </div>
     <div class="meta">id: <code>${esc(jam.id)}</code></div>

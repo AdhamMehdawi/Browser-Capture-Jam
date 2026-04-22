@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import { format, formatDistanceToNow } from "date-fns";
-import { Search, Filter, Video, Clock, Globe, AlertCircle, LayoutGrid, List as ListIcon, MoreVertical, Trash2, Activity } from "lucide-react";
+import { Search, Video, Clock, Globe, AlertCircle, LayoutGrid, List as ListIcon, Trash2, Activity } from "lucide-react";
 import { useListRecordings, useGetRecordingStats, useDeleteRecording, getListRecordingsQueryKey, getGetRecordingStatsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -9,7 +9,6 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from "recharts";
 import { toast } from "sonner";
@@ -29,18 +28,33 @@ export default function Dashboard() {
 
   const deleteRecording = useDeleteRecording();
 
-  const handleDelete = (id: string) => {
-    if (confirm("Are you sure you want to delete this recording?")) {
-      deleteRecording.mutate({ id }, {
-        onSuccess: () => {
-          toast.success("Recording deleted");
-          queryClient.invalidateQueries({ queryKey: getListRecordingsQueryKey() });
-          queryClient.invalidateQueries({ queryKey: getGetRecordingStatsQueryKey() });
-        },
-        onError: () => {
-          toast.error("Failed to delete recording");
-        }
+  const handleDelete = async (id: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    console.log("Delete clicked for id:", id);
+
+    try {
+      // Direct fetch as a workaround
+      const response = await fetch(`/api/recordings/${id}`, {
+        method: 'DELETE',
+        credentials: 'include',
       });
+
+      console.log("Delete response:", response.status);
+
+      if (response.ok) {
+        toast.success("Recording deleted");
+        queryClient.invalidateQueries({ queryKey: getListRecordingsQueryKey() });
+        queryClient.invalidateQueries({ queryKey: getGetRecordingStatsQueryKey() });
+      } else {
+        const errorText = await response.text();
+        console.error("Delete failed:", response.status, errorText);
+        toast.error("Failed to delete recording");
+      }
+    } catch (error) {
+      console.error("Delete error:", error);
+      toast.error("Failed to delete recording");
     }
   };
 
@@ -165,51 +179,93 @@ export default function Dashboard() {
           ) : (
             <div className={viewMode === 'grid' ? "grid grid-cols-1 md:grid-cols-2 gap-4" : "space-y-3"}>
               {recordingsData?.recordings.map((recording) => (
-                <Card key={recording.id} className={`group hover:border-primary/50 transition-colors ${viewMode === 'list' ? 'flex flex-row items-center p-4' : 'flex flex-col overflow-hidden'}`}>
-                  {viewMode === 'grid' && (
-                    <div className="aspect-video bg-muted relative border-b border-border flex items-center justify-center">
-                      {recording.videoObjectPath ? (
-                        <div className="absolute inset-0 bg-black flex items-center justify-center">
-                          <Video className="h-10 w-10 text-white/20" />
-                          <div className="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded font-mono">
-                            {formatDuration(recording.duration)}
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="text-muted-foreground flex flex-col items-center">
-                          <Activity className="h-8 w-8 mb-2 opacity-20" />
-                          <span className="text-xs font-mono">Logs Only</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  
-                  <div className={`p-5 flex-1 flex flex-col ${viewMode === 'list' ? 'p-0' : ''}`}>
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex-1 min-w-0 pr-4">
-                        <Link href={`/recordings/${recording.id}`}>
-                          <h3 className="font-semibold text-base truncate hover:text-primary transition-colors cursor-pointer">
+                <Link key={recording.id} href={`/recordings/${recording.id}`} className="block">
+                  <Card className={`group hover:border-primary/50 transition-colors cursor-pointer ${viewMode === 'list' ? 'flex flex-row items-center p-4' : 'flex flex-col overflow-hidden'}`}>
+                    {viewMode === 'grid' && (
+                      <div className="aspect-video bg-muted relative border-b border-border flex items-center justify-center overflow-hidden">
+                        {(() => {
+                          const path = recording.videoObjectPath;
+                          const isImage = path && /\.(png|jpg|jpeg|gif|webp)$/i.test(path);
+                          // Treat as video if: has path AND (has video extension OR duration > 1 second OR no extension at all)
+                          const isVideo = path && !isImage && (
+                            /\.(webm|mp4|mov|avi|mkv)$/i.test(path) ||
+                            recording.duration > 1000 ||
+                            !/\.[a-z0-9]+$/i.test(path)
+                          );
+
+                          if (isVideo) {
+                            return (
+                              <div className="absolute inset-0 bg-black flex items-center justify-center">
+                                <video
+                                  src={`/api/storage/${path!.replace(/^\/objects\//, '').replace(/^\/local-media\//, 'local/')}`}
+                                  className="w-full h-full object-cover"
+                                  muted
+                                  loop
+                                  playsInline
+                                  preload="metadata"
+                                  onMouseEnter={(e) => e.currentTarget.play()}
+                                  onMouseLeave={(e) => { e.currentTarget.pause(); e.currentTarget.currentTime = 0; }}
+                                  onError={(e) => {
+                                    // If video fails to load, hide it and show fallback
+                                    e.currentTarget.style.display = 'none';
+                                    const fallback = e.currentTarget.parentElement?.querySelector('.video-fallback');
+                                    if (fallback) (fallback as HTMLElement).style.display = 'flex';
+                                  }}
+                                />
+                                <div className="video-fallback hidden absolute inset-0 items-center justify-center text-muted-foreground flex-col">
+                                  <Activity className="h-8 w-8 mb-2 opacity-20" />
+                                  <span className="text-xs font-mono">Preview unavailable</span>
+                                </div>
+                                <div className="absolute inset-0 flex items-center justify-center pointer-events-none group-hover:opacity-0 transition-opacity bg-black/30">
+                                  <Video className="h-10 w-10 text-white/60" />
+                                </div>
+                                <div className="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded font-mono">
+                                  {formatDuration(recording.duration)}
+                                </div>
+                              </div>
+                            );
+                          } else if (isImage) {
+                            return (
+                              <div className="absolute inset-0 bg-black flex items-center justify-center">
+                                <img
+                                  src={`/api/storage/${path!.replace(/^\/objects\//, '').replace(/^\/local-media\//, 'local/')}`}
+                                  className="w-full h-full object-cover"
+                                  alt={recording.title}
+                                />
+                              </div>
+                            );
+                          } else {
+                            return (
+                              <div className="text-muted-foreground flex flex-col items-center">
+                                <Activity className="h-8 w-8 mb-2 opacity-20" />
+                                <span className="text-xs font-mono">Logs Only</span>
+                              </div>
+                            );
+                          }
+                        })()}
+                      </div>
+                    )}
+
+                    <div className={`p-5 flex-1 flex flex-col ${viewMode === 'list' ? 'p-0' : ''}`}>
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex-1 min-w-0 pr-4">
+                          <h3 className="font-semibold text-base truncate group-hover:text-primary transition-colors">
                             {recording.title}
                           </h3>
-                        </Link>
-                        <p className="text-sm text-muted-foreground truncate mt-1 flex items-center gap-1.5">
-                          <Globe size={12} />
-                          {recording.pageUrl ? new URL(recording.pageUrl).hostname : 'Unknown site'}
-                        </p>
+                          <p className="text-sm text-muted-foreground truncate mt-1 flex items-center gap-1.5">
+                            <Globe size={12} />
+                            {recording.pageUrl ? new URL(recording.pageUrl).hostname : 'Unknown site'}
+                          </p>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                          onClick={(e) => handleDelete(recording.id, e)}
+                        >
+                          <Trash2 size={16} />
+                        </Button>
                       </div>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <MoreVertical size={16} />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleDelete(recording.id)} className="text-destructive focus:text-destructive">
-                            <Trash2 className="mr-2 h-4 w-4" /> Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
 
                     <div className={`mt-auto flex items-center justify-between text-xs text-muted-foreground ${viewMode === 'list' ? 'hidden' : ''}`}>
                       <div className="flex items-center gap-3">
@@ -251,7 +307,8 @@ export default function Dashboard() {
                       </div>
                     )}
                   </div>
-                </Card>
+                  </Card>
+                </Link>
               ))}
             </div>
           )}

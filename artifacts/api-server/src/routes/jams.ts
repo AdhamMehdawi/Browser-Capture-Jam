@@ -60,7 +60,7 @@ router.post("/jams", requireAuth, async (req: any, res) => {
         events.push({
           id: randomUUID(),
           type: "request",
-          timestamp: netReq.timestamp || Date.now(),
+          timestamp: netReq.timestamp || netReq.startedAt || Date.now(),
           method: netReq.method || "GET",
           url: netReq.url || "",
           status: netReq.status,
@@ -69,8 +69,29 @@ router.post("/jams", requireAuth, async (req: any, res) => {
           responseHeaders: netReq.responseHeaders,
           requestBody: netReq.requestBody,
           responseBody: netReq.responseBody,
-          duration: netReq.duration,
+          duration: netReq.durationMs || netReq.duration,
           error: netReq.error,
+        });
+      }
+    }
+
+    // Transform user actions (clicks, inputs, selects, submits, navigations)
+    if (Array.isArray(body.actions)) {
+      for (const action of body.actions) {
+        events.push({
+          id: randomUUID(),
+          type: action.type, // click, input, select, submit, navigation
+          timestamp: action.timestamp || Date.now(),
+          selector: action.selector || "",
+          selectorAlts: action.selectorAlts || [],
+          url: action.url || "",
+          value: action.value,
+          // Flatten target metadata for easier display in dashboard
+          targetTag: action.target?.tag,
+          targetText: action.target?.text,
+          targetRole: action.target?.role,
+          inputType: action.target?.inputType,
+          targetName: action.target?.name,
         });
       }
     }
@@ -84,6 +105,16 @@ router.post("/jams", requireAuth, async (req: any, res) => {
     ).length;
     const consoleCount = events.filter((e) => e.type === "console").length;
     const clickCount = events.filter((e) => e.type === "click").length;
+    const actionsCount = events.filter((e) => ["click", "input", "select", "submit", "navigation"].includes(e.type)).length;
+
+    console.log("[jams] Transformed events:", {
+      total: events.length,
+      network: networkLogsCount,
+      console: consoleCount,
+      actions: actionsCount,
+      clicks: clickCount,
+      errors: errorCount,
+    });
 
     // Handle video/screenshot upload - store locally
     let videoObjectPath: string | null = null;

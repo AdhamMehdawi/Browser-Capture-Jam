@@ -47,3 +47,7 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Local media storage (uploaded videos/screenshots)
+.data/
+**/\.data/

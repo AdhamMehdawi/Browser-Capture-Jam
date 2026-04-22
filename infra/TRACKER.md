@@ -1,0 +1,140 @@
+# VeloCap — Deployment tracker
+
+Living status of the Azure deployment. Update after any meaningful change
+(deploy, config flip, blocker found, decision revisited). Keep honest.
+
+**Legend:** ⬜ not started · 🟨 in progress · ✅ done · ⏸ deferred · ⚠️ blocker
+
+---
+
+## Locked decisions
+
+| # | Topic | Choice |
+|---|---|---|
+| Q1 | Components to ship | `artifacts/api-server/` + `artifacts/snapcap-dashboard/` + `velo-qa/extension/` (code unchanged) |
+| Q2 | Subscription | **The JUMP App Subscription** · `fb42fb29-4fcc-40a9-9ff0-21ef191674af` · **Sponsorship** (`Sponsored_2016-01-01`) |
+| Q2 | Tenant | `malakalsaffarthejumpapp.onmicrosoft.com` · `0451fcf1-2dd9-4eff-90e3-8396b9df62d9` |
+| Q3 | Environments | Prod + Dev, single RG `VeloCap`, suffixed |
+| Q4 | Region | `uaenorth` (3 AZs) |
+| Q5 | Domain / DNS | None — Azure default URLs for v1 |
+| Q6 | Compute | SWA (dashboard) + ACA (backend) |
+| Q7 | Auth | Keep Clerk (no change) |
+| Q8 | IaC | Terraform, remote state in Azure Storage |
+| Q9 | CI/CD | GitHub Actions + OIDC (planned, not built yet) |
+| Q10 | Compliance | None |
+| Q11 | Budget | Minimal SKUs everywhere, ~$45–90/mo dev+prod |
+| Q12 | Ops | Azure Monitor alerts → email only |
+| — | RBAC approach | **Option 2** — no sub-scope role assignments. KV access policies, ACR admin user, storage connection string in KV, shared-key TF backend. |
+
+## Deployer
+
+- **Identity:** `tareq@menatal.com`
+- **Role:** Contributor on sub (not Owner). Sufficient for everything under Option 2.
+
+---
+
+## Phases
+
+### Phase 0 — Pre-flight ✅
+- ✅ Subscription confirmed (ID, tenant, offer type = Sponsorship)
+- ✅ Region decided (`uaenorth`)
+- ✅ Deployer role verified (Contributor, Option 2 chosen)
+- ⚠️ **Sponsorship credit balance** still unverified — Malak to check at https://www.microsoftazuresponsorships.com/Balance
+- ⏸ Tareq Owner-role elevation (explicitly deferred — Option 2 means we don't need it)
+
+### Phase 1 — State backend bootstrap ✅
+- ✅ `velocap-tfstate-rg` RG created
+- ✅ `velocaptfstateaue01` Storage Account + `tfstate` container
+- ✅ `infra/bootstrap/` Terraform applied (local state)
+- ✅ Remote state backend switched to shared-key auth (Option 2)
+
+### Phase 2 — Shared infra
+Merged into Phase 3 — `velocapcr` (ACR) and `velocap-law-dev` (Log Analytics)
+were created as part of the dev env apply rather than a separate shared stack.
+Prod will reuse both.
+
+### Phase 3 — Dev env infra ✅
+All 19 resources applied successfully (2026-04-21). See "Live resource snapshot" below.
+- ✅ Postgres + firewall + `velocap` database
+- ✅ Key Vault + 7 secrets (5 real, 2 placeholder for Clerk)
+- ✅ Storage Account + `assets` container
+- ✅ ACR Basic (admin-enabled)
+- ✅ Log Analytics + App Insights
+- ✅ Container Apps environment + `velocap-api-dev` (placeholder image, port 4000 ingress)
+- ✅ Static Web App `velocap-swa-dev` (empty, westeurope)
+
+### Phase 4 — API port 🟨 next
+- ⬜ Patch `artifacts/api-server/src/lib/objectStorage.ts` — replace Replit GCS sidecar with `@azure/storage-blob`
+- ⬜ Add a `Dockerfile` to `artifacts/api-server/`
+- ⬜ Build image locally; verify it starts against `DATABASE_URL` + `STORAGE_CONNECTION_STRING`
+- ⬜ `az acr login --name velocapcr`; push image tag `velocapcr.azurecr.io/api-server:<sha>`
+- ⬜ Update `infra/envs/dev/variables.tf`'s `api_image` default OR pass via `-var`; `terraform apply`
+
+### Phase 5 — Dashboard + secrets + smoke test ⬜
+- ⬜ Set Clerk keys in KV:
+  `az keyvault secret set --vault-name velocap-kv-dev --name clerk-secret-key --value sk_test_...`
+  `az keyvault secret set --vault-name velocap-kv-dev --name clerk-publishable-key --value pk_test_...`
+- ⬜ Restart api-server revision to pick up new secret versions
+- ⬜ `vite build` the dashboard with `VITE_API_URL=https://velocap-api-dev...azurecontainerapps.io`
+- ⬜ Deploy build output to `velocap-swa-dev` (SWA CLI or GitHub Action)
+- ⬜ Smoke test: log in via Clerk → dashboard loads → API `/api/me` returns 200
+
+### Phase 6 — Prod env ⬜
+- ⬜ Create `infra/envs/prod/` as a near-copy of `dev/`, with `-prod` suffixes + `min_replicas = 1` on the API
+- ⬜ `terraform init && terraform apply` for prod
+- ⬜ Push same image tag to `velocap-api-prod`
+- ⬜ Deploy dashboard build (different `VITE_API_URL`) to `velocap-swa-prod`
+
+### Phase 7 — CI/CD + alerts + extension ⬜
+- ⬜ GitHub Actions OIDC federated credentials (Entra app reg)
+- ⬜ `.github/workflows/terraform-plan.yml` on PR
+- ⬜ `.github/workflows/deploy-dev.yml` on push to `deployment`
+- ⬜ `.github/workflows/deploy-prod.yml` on tag / manual dispatch
+- ⬜ Alert rules: ACA 5xx > 2% / 5m, Postgres CPU > 80% / 10m, KV secret near-expiry, monthly cost > 80% of budget
+- ⬜ Rebuild extension with `VITE_API_URL=<prod api>`, re-publish to Chrome Web Store
+
+---
+
+## Live resource snapshot
+
+Resource group **`VeloCap`** (uaenorth):
+
+| Resource | Name | Notes |
+|---|---|---|
+| Log Analytics | `velocap-law-dev` | 1 GB/day cap, 30d retention |
+| App Insights | `velocap-appi-dev` | workspace-based |
+| ACR | `velocapcr` | Basic, admin-enabled, **empty (no images pushed yet)** |
+| Key Vault | `velocap-kv-dev` | Access-policy mode; 7 secrets |
+| Storage | `velocapstdevaue01` | `assets` container created |
+| Postgres | `velocap-pg-dev` | B1ms, 32 GB, no HA, database `velocap`, public + Azure-services firewall rule |
+| ACA env | `velocap-cae-dev` | logs → LAW |
+| Container App | `velocap-api-dev` | placeholder image; FQDN: `velocap-api-dev.greenrock-0aa61fcc.uaenorth.azurecontainerapps.io`, port 4000 |
+| Static Web App | `velocap-swa-dev` | Free, **empty**; FQDN: `salmon-sea-0c8c28b03.7.azurestaticapps.net` (westeurope) |
+
+Resource group **`velocap-tfstate-rg`** (uaenorth):
+
+| Resource | Name |
+|---|---|
+| Storage | `velocaptfstateaue01` / container `tfstate` / blob `dev.tfstate` |
+
+## Open items / known gaps
+
+1. ⚠️ **Sponsorship credit balance unverified** — ping Malak.
+2. ⚠️ **Replit sidecar lock-in** — `artifacts/api-server/src/lib/objectStorage.ts:12` hard-codes `http://127.0.0.1:1106`. Must be replaced before backend boots on ACA. (Phase 4 task.)
+3. ⚠️ **Extension ↔ API protocol mismatch** — `velo-qa/extension` calls `/auth/login` + `/jams`; api-server exposes `/api/recordings` + Clerk. Deployment works, end-to-end flow doesn't. Decision deferred — address alongside rename.
+4. ⏸ **Code rename SnapCap → VeloCap** — deferred by user (focus = deploy only).
+5. ⏸ **Front Door / custom domain / WAF** — deferred to post-MVP "domain day".
+6. ⏸ **Postgres zone-redundant HA** — deferred; re-evaluate before real users hit prod.
+7. ⏸ **Move to commercial sub (PAYG/MCA)** — required before sponsored sub sees real customer traffic (Sponsorship TOU disallows prod use).
+
+---
+
+## Changelog
+
+- **2026-04-22** — Tracker file created. Phases 0–3 marked done retroactively based on actual applied state.
+- **2026-04-21** — `infra/envs/dev` applied (19 resources). Container App on placeholder image; Postgres + KV + Storage + ACR all provisioned. Commit `2f8fa9d` on branch `deployment`.
+- **2026-04-21** — Bootstrap stack applied. `velocaptfstateaue01` Storage Account created for remote Terraform state.
+- **2026-04-21** — `VeloCap` and `velocap-tfstate-rg` resource groups created via `az group create`.
+- **2026-04-21** — Terraform 1.14.9 installed via `brew install hashicorp/tap/terraform`.
+- **2026-04-21** — Option 2 RBAC approach locked (no sub-scope role assignments).
+- **2026-04-21** — All 12 design decisions locked. Deployment branch cut from `main` (`f85622d`).

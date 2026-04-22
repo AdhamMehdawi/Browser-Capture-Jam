@@ -169,6 +169,9 @@ module "api" {
   env_vars = [
     { name = "NODE_ENV", value = "development" },
     { name = "PORT", value = "4000" },
+    # MOCK_AUTH bypasses Clerk entirely while Clerk keys in KV are still
+    # placeholders. Remove once real keys are set via `az keyvault secret set`.
+    { name = "MOCK_AUTH", value = "true" },
   ]
 
   env_secret_refs = [

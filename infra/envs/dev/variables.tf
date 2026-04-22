@@ -23,9 +23,9 @@ variable "env" {
   default = "dev"
 }
 
-# API image is set after the first ACR push. Until then, a placeholder image
-# keeps the Container App creatable.
+# Bumped on each image push. Override via `-var 'api_image=...'` for manual
+# deploys, or bake the build pipeline to set it automatically.
 variable "api_image" {
   type    = string
-  default = "mcr.microsoft.com/k8se/quickstart:latest"
+  default = "velocapcr.azurecr.io/api-server:09d89c8-fix2"
 }

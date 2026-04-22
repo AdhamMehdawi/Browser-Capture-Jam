@@ -1,6 +1,6 @@
-import { File } from "@google-cloud/storage";
+import type { BlockBlobClient } from "@azure/storage-blob";
 
-const ACL_POLICY_METADATA_KEY = "custom:aclPolicy";
+const ACL_POLICY_METADATA_KEY = "customAclPolicy";
 
 // Can be flexibly defined according to the use case.
 //
@@ -29,7 +29,9 @@ export interface ObjectAclRule {
   permission: ObjectPermission;
 }
 
-// Stored as object custom metadata under "custom:aclPolicy" (JSON string).
+// Stored as blob metadata under "customAclPolicy" (JSON string).
+// Azure blob metadata keys must match C# identifier rules — no colons,
+// alphanumerics + underscore only — so the key differs from the GCS version.
 export interface ObjectAclPolicy {
   owner: string;
   visibility: "public" | "private";
@@ -68,30 +70,26 @@ function createObjectAccessGroup(
 }
 
 export async function setObjectAclPolicy(
-  objectFile: File,
+  blob: BlockBlobClient,
   aclPolicy: ObjectAclPolicy,
 ): Promise<void> {
-  const [exists] = await objectFile.exists();
-  if (!exists) {
-    throw new Error(`Object not found: ${objectFile.name}`);
+  if (!(await blob.exists())) {
+    throw new Error(`Object not found: ${blob.name}`);
   }
-
-  await objectFile.setMetadata({
-    metadata: {
-      [ACL_POLICY_METADATA_KEY]: JSON.stringify(aclPolicy),
-    },
+  await blob.setMetadata({
+    [ACL_POLICY_METADATA_KEY]: JSON.stringify(aclPolicy),
   });
 }
 
 export async function getObjectAclPolicy(
-  objectFile: File,
+  blob: BlockBlobClient,
 ): Promise<ObjectAclPolicy | null> {
-  const [metadata] = await objectFile.getMetadata();
-  const aclPolicy = metadata?.metadata?.[ACL_POLICY_METADATA_KEY];
-  if (!aclPolicy) {
+  const props = await blob.getProperties();
+  const raw = props.metadata?.[ACL_POLICY_METADATA_KEY];
+  if (!raw) {
     return null;
   }
-  return JSON.parse(aclPolicy as string);
+  return JSON.parse(raw);
 }
 
 export async function canAccessObject({
@@ -100,7 +98,7 @@ export async function canAccessObject({
   requestedPermission,
 }: {
   userId?: string;
-  objectFile: File;
+  objectFile: BlockBlobClient;
   requestedPermission: ObjectPermission;
 }): Promise<boolean> {
   const aclPolicy = await getObjectAclPolicy(objectFile);

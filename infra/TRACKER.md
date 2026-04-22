@@ -63,12 +63,20 @@ All 19 resources applied successfully (2026-04-21). See "Live resource snapshot"
 - ✅ Container Apps environment + `velocap-api-dev` (placeholder image, port 4000 ingress)
 - ✅ Static Web App `velocap-swa-dev` (empty, westeurope)
 
-### Phase 4 — API port 🟨 next
-- ⬜ Patch `artifacts/api-server/src/lib/objectStorage.ts` — replace Replit GCS sidecar with `@azure/storage-blob`
-- ⬜ Add a `Dockerfile` to `artifacts/api-server/`
-- ⬜ Build image locally; verify it starts against `DATABASE_URL` + `STORAGE_CONNECTION_STRING`
-- ⬜ `az acr login --name velocapcr`; push image tag `velocapcr.azurecr.io/api-server:<sha>`
-- ⬜ Update `infra/envs/dev/variables.tf`'s `api_image` default OR pass via `-var`; `terraform apply`
+### Phase 4 — API port ✅
+- ✅ Patched `objectStorage.ts` + `objectAcl.ts` to use `@azure/storage-blob` (replaces Replit GCS sidecar)
+- ✅ Swapped `@google-cloud/storage` / `google-auth-library` → `@azure/storage-blob` in `artifacts/api-server/package.json`
+- ✅ Patched `routes/jams.ts` so the top-level `mkdirSync` failure is non-fatal (it was crashing on ACA's read-only FS)
+- ✅ Dockerfile + `.dockerignore` (uses `pnpm deploy --legacy` + matches build/runtime WORKDIR to avoid `esbuild-plugin-pino` path bug)
+- ✅ `az acr build` pushes `velocapcr.azurecr.io/api-server:09d89c8-fix2` (and `:latest`)
+- ✅ Terraform applied with `MOCK_AUTH=true` env var + new image; ACA revision `velocap-api-dev--0000003` is **Healthy**
+- ✅ `GET /api/healthz` returns `{"status":"ok"}` in ~440 ms (warm)
+
+Known follow-ups (do NOT block Phase 5):
+- ⚠️ `routes/jams.ts` uses local SQLite + local disk for extension uploads — will fail at runtime on ACA. Full rework: route media through Azure Blob, use Postgres instead of SQLite.
+- ⚠️ `MOCK_AUTH=true` bypasses Clerk. Remove once real Clerk keys are set in KV (Phase 5).
+- ⚠️ Drizzle schema not yet pushed to `velocap-pg-dev` — any DB-touching route returns 500.
+- ⚠️ `variables.tf` default for `api_image` must be bumped on every push (or `-var` passed) — better handled by CI in Phase 7.
 
 ### Phase 5 — Dashboard + secrets + smoke test ⬜
 - ⬜ Set Clerk keys in KV:
@@ -108,7 +116,7 @@ Resource group **`VeloCap`** (uaenorth):
 | Storage | `velocapstdevaue01` | `assets` container created |
 | Postgres | `velocap-pg-dev` | B1ms, 32 GB, no HA, database `velocap`, public + Azure-services firewall rule |
 | ACA env | `velocap-cae-dev` | logs → LAW |
-| Container App | `velocap-api-dev` | placeholder image; FQDN: `velocap-api-dev.greenrock-0aa61fcc.uaenorth.azurecontainerapps.io`, port 4000 |
+| Container App | `velocap-api-dev` | image `velocapcr.azurecr.io/api-server:09d89c8-fix2`; FQDN: `velocap-api-dev.greenrock-0aa61fcc.uaenorth.azurecontainerapps.io`; `/api/healthz` returns 200 |
 | Static Web App | `velocap-swa-dev` | Free, **empty**; FQDN: `salmon-sea-0c8c28b03.7.azurestaticapps.net` (westeurope) |
 
 Resource group **`velocap-tfstate-rg`** (uaenorth):
@@ -131,6 +139,7 @@ Resource group **`velocap-tfstate-rg`** (uaenorth):
 
 ## Changelog
 
+- **2026-04-22** — Phase 4 done. api-server image `09d89c8-fix2` pushed to `velocapcr`, running in `velocap-api-dev`, `/api/healthz` returning 200. Option A (SnapCap stack) locked after realizing velo-qa/server + snapcap-dashboard + velo-qa/extension mix wasn't coherent. Decision was triggered by the user sharing the "Summary Table" image.
 - **2026-04-22** — Tracker file created. Phases 0–3 marked done retroactively based on actual applied state.
 - **2026-04-21** — `infra/envs/dev` applied (19 resources). Container App on placeholder image; Postgres + KV + Storage + ACR all provisioned. Commit `2f8fa9d` on branch `deployment`.
 - **2026-04-21** — Bootstrap stack applied. `velocaptfstateaue01` Storage Account created for remote Terraform state.

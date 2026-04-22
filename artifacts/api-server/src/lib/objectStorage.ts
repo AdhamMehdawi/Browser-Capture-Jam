@@ -1,33 +1,25 @@
-import { Storage, File } from "@google-cloud/storage";
+import {
+  BlobServiceClient,
+  BlobSASPermissions,
+  generateBlobSASQueryParameters,
+  StorageSharedKeyCredential,
+  type BlockBlobClient,
+  type ContainerClient,
+} from "@azure/storage-blob";
 import { Readable } from "stream";
 import { randomUUID } from "crypto";
 import {
   ObjectAclPolicy,
   ObjectPermission,
   canAccessObject,
-  getObjectAclPolicy,
   setObjectAclPolicy,
 } from "./objectAcl";
 
-const REPLIT_SIDECAR_ENDPOINT = "http://127.0.0.1:1106";
-
-export const objectStorageClient = new Storage({
-  credentials: {
-    audience: "replit",
-    subject_token_type: "access_token",
-    token_url: `${REPLIT_SIDECAR_ENDPOINT}/token`,
-    type: "external_account",
-    credential_source: {
-      url: `${REPLIT_SIDECAR_ENDPOINT}/credential`,
-      format: {
-        type: "json",
-        subject_token_field_name: "access_token",
-      },
-    },
-    universe_domain: "googleapis.com",
-  },
-  projectId: "",
-});
+// Layout inside the container:
+//   objects/<uuid>      — private entities (recordings, captures)
+//   public/<path>       — public assets (served unauthenticated)
+const PRIVATE_PREFIX = "objects";
+const PUBLIC_PREFIX = "public";
 
 export class ObjectNotFoundError extends Error {
   constructor() {
@@ -38,155 +30,140 @@ export class ObjectNotFoundError extends Error {
 }
 
 export class ObjectStorageService {
-  constructor() {}
+  private container: ContainerClient;
+  private sharedKey: StorageSharedKeyCredential;
+  private accountName: string;
 
-  getPublicObjectSearchPaths(): Array<string> {
-    const pathsStr = process.env.PUBLIC_OBJECT_SEARCH_PATHS || "";
-    const paths = Array.from(
-      new Set(
-        pathsStr
-          .split(",")
-          .map((path) => path.trim())
-          .filter((path) => path.length > 0)
-      )
-    );
-    if (paths.length === 0) {
+  constructor() {
+    const conn = process.env.STORAGE_CONNECTION_STRING;
+    if (!conn) {
       throw new Error(
-        "PUBLIC_OBJECT_SEARCH_PATHS not set. Create a bucket in 'Object Storage' " +
-          "tool and set PUBLIC_OBJECT_SEARCH_PATHS env var (comma-separated paths)."
+        "STORAGE_CONNECTION_STRING not set. Provision the storage account " +
+          "and wire the connection string (see infra/envs/dev/main.tf)."
       );
     }
-    return paths;
+    const containerName = process.env.STORAGE_CONTAINER || "assets";
+
+    const svc = BlobServiceClient.fromConnectionString(conn);
+    this.container = svc.getContainerClient(containerName);
+
+    // SAS generation needs the raw account key; pull it from the connection
+    // string. Azure SDK's fromConnectionString hides the key internally.
+    const accountMatch = conn.match(/AccountName=([^;]+)/i);
+    const keyMatch = conn.match(/AccountKey=([^;]+)/i);
+    if (!accountMatch || !keyMatch) {
+      throw new Error(
+        "STORAGE_CONNECTION_STRING must include AccountName + AccountKey"
+      );
+    }
+    this.accountName = accountMatch[1];
+    this.sharedKey = new StorageSharedKeyCredential(
+      accountMatch[1],
+      keyMatch[1]
+    );
   }
 
   getPrivateObjectDir(): string {
-    const dir = process.env.PRIVATE_OBJECT_DIR || "";
-    if (!dir) {
-      throw new Error(
-        "PRIVATE_OBJECT_DIR not set. Create a bucket in 'Object Storage' " +
-          "tool and set PRIVATE_OBJECT_DIR env var."
-      );
-    }
-    return dir;
+    return PRIVATE_PREFIX;
   }
 
-  async searchPublicObject(filePath: string): Promise<File | null> {
-    for (const searchPath of this.getPublicObjectSearchPaths()) {
-      const fullPath = `${searchPath}/${filePath}`;
-
-      const { bucketName, objectName } = parseObjectPath(fullPath);
-      const bucket = objectStorageClient.bucket(bucketName);
-      const file = bucket.file(objectName);
-
-      const [exists] = await file.exists();
-      if (exists) {
-        return file;
-      }
-    }
-
-    return null;
+  async searchPublicObject(filePath: string): Promise<BlockBlobClient | null> {
+    const blob = this.container.getBlockBlobClient(
+      `${PUBLIC_PREFIX}/${filePath}`
+    );
+    return (await blob.exists()) ? blob : null;
   }
 
-  async downloadObject(file: File, cacheTtlSec: number = 3600): Promise<Response> {
-    const [metadata] = await file.getMetadata();
-    const aclPolicy = await getObjectAclPolicy(file);
-    const isPublic = aclPolicy?.visibility === "public";
+  async downloadObject(
+    blob: BlockBlobClient,
+    cacheTtlSec: number = 3600
+  ): Promise<Response> {
+    const props = await blob.getProperties();
+    const policy = await getAclVisibility(blob);
+    const isPublic = policy === "public";
 
-    const nodeStream = file.createReadStream();
-    const webStream = Readable.toWeb(nodeStream) as ReadableStream;
+    const dl = await blob.download();
+    const nodeStream = dl.readableStreamBody as NodeJS.ReadableStream | undefined;
+    if (!nodeStream) {
+      throw new ObjectNotFoundError();
+    }
+    const webStream = Readable.toWeb(nodeStream as Readable) as ReadableStream;
 
     const headers: Record<string, string> = {
-      "Content-Type": (metadata.contentType as string) || "application/octet-stream",
+      "Content-Type": props.contentType ?? "application/octet-stream",
       "Cache-Control": `${isPublic ? "public" : "private"}, max-age=${cacheTtlSec}`,
     };
-    if (metadata.size) {
-      headers["Content-Length"] = String(metadata.size);
+    if (props.contentLength != null) {
+      headers["Content-Length"] = String(props.contentLength);
     }
 
     return new Response(webStream, { headers });
   }
 
   async getObjectEntityUploadURL(): Promise<string> {
-    const privateObjectDir = this.getPrivateObjectDir();
-    if (!privateObjectDir) {
-      throw new Error(
-        "PRIVATE_OBJECT_DIR not set. Create a bucket in 'Object Storage' " +
-          "tool and set PRIVATE_OBJECT_DIR env var."
-      );
-    }
+    const id = randomUUID();
+    const blobName = `${PRIVATE_PREFIX}/${id}`;
+    const blob = this.container.getBlockBlobClient(blobName);
 
-    const objectId = randomUUID();
-    const fullPath = `${privateObjectDir}/uploads/${objectId}`;
+    const sas = generateBlobSASQueryParameters(
+      {
+        containerName: this.container.containerName,
+        blobName,
+        permissions: BlobSASPermissions.parse("cw"),
+        startsOn: new Date(Date.now() - 60_000),
+        expiresOn: new Date(Date.now() + 15 * 60_000),
+      },
+      this.sharedKey
+    ).toString();
 
-    const { bucketName, objectName } = parseObjectPath(fullPath);
-
-    return signObjectURL({
-      bucketName,
-      objectName,
-      method: "PUT",
-      ttlSec: 900,
-    });
+    return `${blob.url}?${sas}`;
   }
 
-  async getObjectEntityFile(objectPath: string): Promise<File> {
+  async getObjectEntityFile(objectPath: string): Promise<BlockBlobClient> {
     if (!objectPath.startsWith("/objects/")) {
       throw new ObjectNotFoundError();
     }
-
-    const parts = objectPath.slice(1).split("/");
-    if (parts.length < 2) {
+    const entityId = objectPath.slice("/objects/".length);
+    if (!entityId) {
       throw new ObjectNotFoundError();
     }
-
-    const entityId = parts.slice(1).join("/");
-    let entityDir = this.getPrivateObjectDir();
-    if (!entityDir.endsWith("/")) {
-      entityDir = `${entityDir}/`;
-    }
-    const objectEntityPath = `${entityDir}${entityId}`;
-    const { bucketName, objectName } = parseObjectPath(objectEntityPath);
-    const bucket = objectStorageClient.bucket(bucketName);
-    const objectFile = bucket.file(objectName);
-    const [exists] = await objectFile.exists();
-    if (!exists) {
+    const blob = this.container.getBlockBlobClient(
+      `${PRIVATE_PREFIX}/${entityId}`
+    );
+    if (!(await blob.exists())) {
       throw new ObjectNotFoundError();
     }
-    return objectFile;
+    return blob;
   }
 
+  // Accepts an upload URL (SAS) or a bare /objects/<id> path; returns the
+  // canonical /objects/<id> form.
   normalizeObjectEntityPath(rawPath: string): string {
-    if (!rawPath.startsWith("https://storage.googleapis.com/")) {
-      return rawPath;
+    try {
+      const u = new URL(rawPath);
+      const segments = u.pathname.split("/").filter(Boolean);
+      // [container, "objects", "<id>", ...]
+      const idx = segments.indexOf(PRIVATE_PREFIX);
+      if (idx >= 0 && idx < segments.length - 1) {
+        return `/objects/${segments.slice(idx + 1).join("/")}`;
+      }
+    } catch {
+      /* not a URL */
     }
-
-    const url = new URL(rawPath);
-    const rawObjectPath = url.pathname;
-
-    let objectEntityDir = this.getPrivateObjectDir();
-    if (!objectEntityDir.endsWith("/")) {
-      objectEntityDir = `${objectEntityDir}/`;
-    }
-
-    if (!rawObjectPath.startsWith(objectEntityDir)) {
-      return rawObjectPath;
-    }
-
-    const entityId = rawObjectPath.slice(objectEntityDir.length);
-    return `/objects/${entityId}`;
+    return rawPath;
   }
 
   async trySetObjectEntityAclPolicy(
     rawPath: string,
     aclPolicy: ObjectAclPolicy
   ): Promise<string> {
-    const normalizedPath = this.normalizeObjectEntityPath(rawPath);
-    if (!normalizedPath.startsWith("/")) {
-      return normalizedPath;
+    const normalized = this.normalizeObjectEntityPath(rawPath);
+    if (!normalized.startsWith("/")) {
+      return normalized;
     }
-
-    const objectFile = await this.getObjectEntityFile(normalizedPath);
-    await setObjectAclPolicy(objectFile, aclPolicy);
-    return normalizedPath;
+    const blob = await this.getObjectEntityFile(normalized);
+    await setObjectAclPolicy(blob, aclPolicy);
+    return normalized;
   }
 
   async canAccessObjectEntity({
@@ -195,7 +172,7 @@ export class ObjectStorageService {
     requestedPermission,
   }: {
     userId?: string;
-    objectFile: File;
+    objectFile: BlockBlobClient;
     requestedPermission?: ObjectPermission;
   }): Promise<boolean> {
     return canAccessObject({
@@ -206,62 +183,16 @@ export class ObjectStorageService {
   }
 }
 
-function parseObjectPath(path: string): {
-  bucketName: string;
-  objectName: string;
-} {
-  if (!path.startsWith("/")) {
-    path = `/${path}`;
+async function getAclVisibility(
+  blob: BlockBlobClient
+): Promise<"public" | "private" | null> {
+  const props = await blob.getProperties();
+  const raw = props.metadata?.customAclPolicy;
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed.visibility ?? null;
+  } catch {
+    return null;
   }
-  const pathParts = path.split("/");
-  if (pathParts.length < 3) {
-    throw new Error("Invalid path: must contain at least a bucket name");
-  }
-
-  const bucketName = pathParts[1];
-  const objectName = pathParts.slice(2).join("/");
-
-  return {
-    bucketName,
-    objectName,
-  };
-}
-
-async function signObjectURL({
-  bucketName,
-  objectName,
-  method,
-  ttlSec,
-}: {
-  bucketName: string;
-  objectName: string;
-  method: "GET" | "PUT" | "DELETE" | "HEAD";
-  ttlSec: number;
-}): Promise<string> {
-  const request = {
-    bucket_name: bucketName,
-    object_name: objectName,
-    method,
-    expires_at: new Date(Date.now() + ttlSec * 1000).toISOString(),
-  };
-  const response = await fetch(
-    `${REPLIT_SIDECAR_ENDPOINT}/object-storage/signed-object-url`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(request),
-      signal: AbortSignal.timeout(30_000),
-    }
-  );
-  if (!response.ok) {
-    throw new Error(
-      `Failed to sign object URL, errorcode: ${response.status}, ` +
-        `make sure you're running on Replit`
-    );
-  }
-
-  const { signed_url: signedURL } = await response.json();
-  return signedURL;
 }

@@ -7,10 +7,17 @@ import Database from "better-sqlite3";
 
 const router = Router();
 
-// Local storage mode - always use for development
+// Local storage mode - originally for Replit development.
+// On ACA / any read-only FS this fails; swallow the error so the server still
+// boots. /jams upload endpoints will fail until this is reworked to use Azure
+// Blob (tracked in infra/TRACKER.md as follow-up work).
 const LOCAL_MEDIA_DIR = path.join(process.cwd(), ".data", "media");
-if (!fs.existsSync(LOCAL_MEDIA_DIR)) {
-  fs.mkdirSync(LOCAL_MEDIA_DIR, { recursive: true });
+try {
+  if (!fs.existsSync(LOCAL_MEDIA_DIR)) {
+    fs.mkdirSync(LOCAL_MEDIA_DIR, { recursive: true });
+  }
+} catch (err) {
+  console.warn("[jams] local media dir not writable; /jams uploads will fail:", err);
 }
 
 // Get the SQLite database directly for raw queries

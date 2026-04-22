@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useUser, useClerk } from "@clerk/react";
-import { Activity, Settings, LogOut, Video, Menu, X } from "lucide-react";
+import { Activity, Settings, LogOut, Menu, X } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 
@@ -65,10 +65,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       >
         <div className="p-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground">
-              <Video size={16} />
-            </div>
-            <span className="font-bold text-lg tracking-tight">VeloRec</span>
+            <img src="/logo.png" alt="Velo QA" className="w-12 h-12 object-contain" />
+            <span className="font-bold text-lg tracking-tight">Velo QA</span>
           </div>
           <Button variant="ghost" size="icon" onClick={() => setOpen(false)} aria-label="Close navigation">
             <X size={18} />

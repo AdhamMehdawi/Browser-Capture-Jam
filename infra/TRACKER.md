@@ -7,6 +7,43 @@ Living status of the Azure deployment. Update after any meaningful change
 
 ---
 
+## ⏸ PAUSED — waiting on parallel branch
+
+**As of 2026-04-22**: Phase 5 is paused mid-flight because a **Clerk application is being set up by another developer on a separate branch**. When that branch merges, we'll have real `CLERK_SECRET_KEY` + `CLERK_PUBLISHABLE_KEY` values and can finish Phase 5.
+
+**What the merging developer (or reviewer) needs to know:**
+- Branch `deployment` at commit `7189cdf` contains all the Azure deployment work.
+- Dev env on Azure is live and spending ~$1/day against sponsorship credit.
+- Backend `velocap-api-dev` runs with `MOCK_AUTH=true` (returns `demo_user_001` for any request).
+- Dashboard at `velocap-swa-dev` was built with `VITE_CLERK_PUBLISHABLE_KEY=pk_test_placeholder` — will show Clerk init errors in the browser.
+- The two KV secrets `clerk-secret-key` and `clerk-publishable-key` are stamped `REPLACE_ME` and have `lifecycle.ignore_changes` on value, so `az keyvault secret set` is the right way to update them without Terraform reverting.
+
+**Resume steps when Clerk is ready (in order):**
+1. `az keyvault secret set --vault-name velocap-kv-dev --name clerk-secret-key --value sk_test_...`
+2. `az keyvault secret set --vault-name velocap-kv-dev --name clerk-publishable-key --value pk_test_...`
+3. Edit `infra/envs/dev/main.tf` — remove the `{ name = "MOCK_AUTH", value = "true" }` entry from `env_vars`.
+4. `cd infra/envs/dev && terraform apply -var 'api_image=velocapcr.azurecr.io/api-server:09d89c8-fix2'`
+5. Rebuild dashboard with the **real** `VITE_CLERK_PUBLISHABLE_KEY`:
+   ```bash
+   cd artifacts/snapcap-dashboard
+   VITE_API_URL=https://velocap-api-dev.greenrock-0aa61fcc.uaenorth.azurecontainerapps.io \
+   VITE_CLERK_PUBLISHABLE_KEY=pk_test_<real_key> \
+   PORT=3000 BASE_PATH=/ pnpm run build
+   SWA_TOKEN=$(az staticwebapp secrets list --name velocap-swa-dev --resource-group VeloCap --query properties.apiKey -o tsv)
+   npx --yes @azure/static-web-apps-cli deploy ./dist/public --deployment-token "$SWA_TOKEN" --env production --no-use-keychain
+   ```
+6. Smoke test: open dashboard URL in browser, sign in, verify `/api/me` + `/api/recordings`.
+
+**Cost reminder while paused**: Postgres B1ms (~$20/mo) + ACR Basic (~$5/mo) continue to bill even with zero traffic. ACA scales to zero, SWA Free is free. If the pause is going to be > 1 week, consider `az postgres flexible-server stop -n velocap-pg-dev -g VeloCap` to save ~$0.70/day (stops for max 7 days, then auto-starts).
+
+**Other loose ends**:
+- `tareq-laptop-temp` firewall rule is still on `velocap-pg-dev` (my laptop IP `82.213.7.5`). If IP changes or laptop is retired, remove it: `az postgres flexible-server firewall-rule delete -g VeloCap -n velocap-pg-dev --rule-name tareq-laptop-temp -y`.
+- `deployment` branch is local-only so far — push to origin if the other developer needs to diff/merge.
+
+
+
+---
+
 ## Locked decisions
 
 | # | Topic | Choice |

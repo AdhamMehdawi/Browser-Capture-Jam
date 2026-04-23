@@ -151,25 +151,25 @@ function showOverlay(startedAt: number): void {
       .bar {
         display: inline-flex; align-items: center; gap: 10px;
         padding: 8px 12px;
-        background: #0b0d12; color: #e6e9ef;
-        border: 1px solid #22283a; border-radius: 999px;
+        background: #09090b; color: #fafafa;
+        border: 1px solid #27272a; border-radius: 999px;
         font: 13px/1.3 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         box-shadow: 0 6px 24px rgba(0,0,0,0.35);
         user-select: none;
       }
       .brand { font-weight: 700; letter-spacing: .2px; }
-      .brand b { color: #ff4d7e; }
+      .brand b { color: #7c3aed; }
       .dot {
         width: 8px; height: 8px; border-radius: 50%;
-        background: #ff4d7e;
+        background: #ef4444;
         animation: pulse 1s infinite ease-in-out;
       }
-      .timer { font-variant-numeric: tabular-nums; color: #9aa3b2; min-width: 34px; text-align: center; }
+      .timer { font-variant-numeric: tabular-nums; color: #a1a1aa; min-width: 34px; text-align: center; }
       button {
-        background: #ff4d7e; color: #1a0914; border: 0; border-radius: 6px;
+        background: #7c3aed; color: #ffffff; border: 0; border-radius: 6px;
         padding: 6px 12px; font: inherit; font-weight: 600; cursor: pointer;
       }
-      button:disabled { background: #22283a; color: #9aa3b2; cursor: default; }
+      button:disabled { background: #27272a; color: #a1a1aa; cursor: default; }
       button:hover:not(:disabled) { filter: brightness(1.08); }
       @keyframes pulse {
         0%, 100% { opacity: 1; transform: scale(1); }
@@ -178,7 +178,7 @@ function showOverlay(startedAt: number): void {
     </style>
     <div class="bar" role="status" aria-live="polite">
       <span class="dot" aria-hidden="true"></span>
-      <span class="brand">Open<b>Jam</b></span>
+      <span class="brand">Velo<b>QA</b></span>
       <span class="timer" id="oj-timer">0:00</span>
       <button id="oj-stop">Stop</button>
     </div>

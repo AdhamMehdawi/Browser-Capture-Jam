@@ -22,7 +22,7 @@ if (!MOCK_AUTH) {
  *   1. A Clerk session (cookie-based, used by the dashboard)
  *   2. An `Authorization: Bearer sc_...` API key (used by the Chrome
  *      extension and any other programmatic client)
- *   3. Mock auth for local development (demo_user_001)
+ *   3. Mock auth for local development (demo_user)
  *
  * The api-zod user route generates these keys, the usersTable persists
  * them, and this middleware is the one place that maps either credential
@@ -40,12 +40,12 @@ async function resolveUserId(req: Request): Promise<string | null> {
     if (clerkUserId) return clerkUserId;
   }
 
-  // Check for API key auth
+  // Check for API key or JWT auth
   const header = req.headers["authorization"];
   if (typeof header === "string" && header.startsWith("Bearer ")) {
     const token = header.slice("Bearer ".length).trim();
-    // Only treat strings we actually minted (`sc_` prefix from user.ts) as
-    // candidates. Anything else is presumably a Clerk JWT handled elsewhere.
+
+    // Check if it's our API key format (sc_ prefix)
     if (token.startsWith("sc_") && token.length >= 16) {
       const rows = await db
         .select({ id: usersTable.id })
@@ -54,11 +54,26 @@ async function resolveUserId(req: Request): Promise<string | null> {
         .limit(1);
       if (rows[0]?.id) return rows[0].id;
     }
+
+    // Check if it looks like a JWT (has 3 dot-separated parts)
+    // This handles Clerk JWTs sent from the extension
+    if (token.split('.').length === 3) {
+      try {
+        // Decode the JWT payload to get the user ID (sub claim)
+        // JWTs use base64url encoding
+        const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString());
+        if (payload.sub) {
+          return payload.sub;
+        }
+      } catch {
+        // Invalid JWT format, continue to other auth methods
+      }
+    }
   }
 
   // Mock auth for local development - allow unauthenticated requests
   if (MOCK_AUTH) {
-    return "demo_user_001";
+    return "demo_user";
   }
 
   return null;

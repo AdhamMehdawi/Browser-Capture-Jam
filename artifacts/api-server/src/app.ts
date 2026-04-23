@@ -41,7 +41,17 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 // Skip Clerk middleware when in mock auth mode
 if (!MOCK_AUTH) {
-  app.use(clerkMiddleware());
+  // Use Clerk middleware but don't let it crash on invalid tokens
+  // The requireAuth middleware will handle authorization
+  app.use((req, res, next) => {
+    clerkMiddleware()(req, res, (err) => {
+      // Ignore Clerk errors and continue - our requireAuth will handle auth
+      if (err) {
+        logger.warn({ err: err.message }, "Clerk middleware error (ignored)");
+      }
+      next();
+    });
+  });
 } else {
   logger.info("Running in MOCK_AUTH mode - Clerk authentication disabled");
 }

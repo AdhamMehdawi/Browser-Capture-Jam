@@ -82,6 +82,20 @@ export const api = {
     );
   },
   /**
+   * Verify a Clerk JWT token and get user info.
+   * Used by the extension to authenticate via Clerk session.
+   */
+  verifyClerkToken(token: string) {
+    return request<{ userId: string; email: string | null; name: string | null }>(
+      '/auth/verify-clerk-token',
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        auth: false,
+      }
+    );
+  },
+  /**
    * Get current user profile using API key auth.
    */
   meWithApiKey() {

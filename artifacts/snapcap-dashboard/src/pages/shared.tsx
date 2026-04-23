@@ -76,14 +76,15 @@ export default function SharedRecordingViewer() {
           This share link is invalid or has expired. Please ask the creator to generate a new link.
         </p>
         <Link href="/">
-          <a className="mt-6 text-primary hover:underline font-medium">Go to SnapCap Home</a>
+          <a className="mt-6 text-primary hover:underline font-medium">Go to VeloRec Home</a>
         </Link>
       </div>
     );
   }
 
-  const videoUrl = recording.videoObjectPath 
-    ? `/api/storage/${recording.videoObjectPath.replace(/^\/objects\//, '')}`
+  // Handle both old (/local-media/) and new (/objects/local/) path formats
+  const videoUrl = recording.videoObjectPath
+    ? `/api/storage/${recording.videoObjectPath.replace(/^\/objects\//, '').replace(/^\/local-media\//, 'local/')}`
     : null;
 
   return (

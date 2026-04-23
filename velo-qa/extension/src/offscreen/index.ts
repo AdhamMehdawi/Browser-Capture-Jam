@@ -298,17 +298,42 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
+// Global error handler to catch any unhandled errors
+self.onerror = (message, _source, _lineno, _colno, error) => {
+  console.error('[veloqa/offscreen] Global error:', message, error);
+  chrome.runtime.sendMessage({
+    target: 'bg',
+    kind: 'recorder-error',
+    message: `Offscreen error: ${message}`,
+  });
+};
+
+self.onunhandledrejection = (event) => {
+  console.error('[veloqa/offscreen] Unhandled rejection:', event.reason);
+  chrome.runtime.sendMessage({
+    target: 'bg',
+    kind: 'recorder-error',
+    message: `Offscreen rejection: ${event.reason}`,
+  });
+};
+
 chrome.runtime.onMessage.addListener(
   (msg: StartMsg | StopMsg | { target: 'offscreen'; kind: 'ping' }, _sender, sendResponse) => {
-    if (msg?.target !== 'offscreen') return undefined;
+    // Ignore messages not targeted at offscreen - return false to not interfere
+    if (msg?.target !== 'offscreen') {
+      return false;
+    }
+    console.log('[veloqa/offscreen] received message:', msg?.kind);
     if (msg.kind === 'ping') {
+      console.log('[veloqa/offscreen] responding to ping');
       sendResponse({ ok: true });
       return false;
     }
     if (msg.kind === 'start') {
+      console.log('[veloqa/offscreen] handling start');
       start(msg as StartMsg)
         .then(() => {
-          console.log('[veloqa/offscreen] start resolved');
+          console.log('[veloqa/offscreen] start resolved, sending response');
           sendResponse({ ok: true });
         })
         .catch((err) => {
@@ -316,7 +341,7 @@ chrome.runtime.onMessage.addListener(
           console.error('[veloqa/offscreen] start failed', err);
           sendResponse({ ok: false, message });
         });
-      return true;
+      return true; // Keep message channel open for async response
     }
     if (msg.kind === 'stop') {
       console.log('[veloqa/offscreen] stop');
@@ -324,8 +349,9 @@ chrome.runtime.onMessage.addListener(
       sendResponse({ ok: true });
       return false;
     }
-    return undefined;
+    console.log('[veloqa/offscreen] unknown message kind:', (msg as { kind?: string }).kind);
+    return false;
   },
 );
 
-console.log('[veloqa/offscreen] ready');
+console.log('[veloqa/offscreen] script loaded and listener registered');

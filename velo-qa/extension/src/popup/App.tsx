@@ -1,18 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../shared/api.js';
 import { clearAuth, getAuth, setAuth } from '../shared/storage.js';
+import { DASHBOARD_URL } from '../shared/config.js';
 import type { AuthState } from '../types.js';
 
 type View = 'loading' | 'auth' | 'ready';
 
 /**
- * Validate an API key and create an auth state from it.
- * This is the primary authentication method for the dashboard integration.
+ * Bootstrap auth with a Clerk JWT token.
+ * Verifies the token with the API and creates an auth state.
  */
-async function bootstrapWithApiKey(apiKey: string): Promise<AuthState> {
-  const user = await api.verifyApiKey(apiKey);
+async function bootstrapWithClerkToken(token: string): Promise<AuthState> {
+  const user = await api.verifyClerkToken(token);
   const next: AuthState = {
-    accessToken: apiKey, // Use API key as the access token
+    accessToken: token,
     user: { id: user.userId, email: user.email ?? '', name: user.name },
     workspaces: [{ id: 'default', slug: 'default', name: 'My Recordings', role: 'owner' }],
     activeWorkspaceId: 'default',
@@ -21,67 +22,70 @@ async function bootstrapWithApiKey(apiKey: string): Promise<AuthState> {
   return next;
 }
 
-/**
- * Validate existing API key auth on startup.
- */
-async function validateExistingAuth(stored: AuthState): Promise<AuthState> {
-  // If the token looks like an API key (sc_...), verify it
-  if (stored.accessToken.startsWith('sc_')) {
-    const user = await api.verifyApiKey(stored.accessToken);
-    const next: AuthState = {
-      accessToken: stored.accessToken,
-      user: { id: user.userId, email: user.email ?? '', name: user.name },
-      workspaces: [{ id: 'default', slug: 'default', name: 'My Recordings', role: 'owner' }],
-      activeWorkspaceId: 'default',
-    };
-    await setAuth(next);
-    return next;
-  }
-  // Legacy auth - try to use the old /me endpoint
-  const me = await api.me();
-  const workspaces = me.user.memberships.map((m) => ({
-    id: m.workspace.id,
-    slug: m.workspace.slug,
-    name: m.workspace.name,
-    role: m.role,
-  }));
-  const active =
-    stored.activeWorkspaceId && workspaces.some((w) => w.id === stored.activeWorkspaceId)
-      ? stored.activeWorkspaceId
-      : workspaces[0]?.id;
-  if (!active) throw new Error('no workspace');
-  const next: AuthState = {
-    accessToken: stored.accessToken,
-    user: { id: me.user.id, email: me.user.email, name: me.user.name },
-    workspaces,
-    activeWorkspaceId: active,
-  };
-  await setAuth(next);
-  return next;
-}
-
-// Hardcoded demo auth for local development - no login required
-const DEMO_AUTH: AuthState = {
-  accessToken: 'demo_token',
-  user: { id: 'demo_user', email: 'mo@menatal.com', name: 'Mohammad Makhamreh' },
-  workspaces: [{ id: 'default', slug: 'default', name: 'My Workspace', role: 'owner' }],
-  activeWorkspaceId: 'default',
-};
-
 export function App() {
-  const [view, setView] = useState<View>('ready');
-  const [auth, setAuthState] = useState<AuthState | null>(DEMO_AUTH);
+  const [view, setView] = useState<View>('loading');
+  const [auth, setAuthState] = useState<AuthState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Listen for auth callback from dashboard
   useEffect(() => {
-    // Auto-save demo auth to storage so background script can use it
-    void setAuth(DEMO_AUTH);
+    const handleMessage = (
+      message: { kind?: string; target?: string; token?: string },
+      _sender: chrome.runtime.MessageSender,
+      _sendResponse: (response?: unknown) => void
+    ): boolean => {
+      // Ignore messages intended for other targets (offscreen, bg, etc.)
+      // Return false to not interfere with their response handling
+      if (message?.target) {
+        return false;
+      }
+      if (message?.kind === 'clerk-auth-callback' && message.token) {
+        const token = message.token;
+        void (async () => {
+          try {
+            const next = await bootstrapWithClerkToken(token);
+            setAuthState(next);
+            setError(null);
+            setView('ready');
+          } catch (e) {
+            console.error('[popup] Auth callback failed:', e);
+            setError(e instanceof Error ? e.message : 'Authentication failed');
+          }
+        })();
+        return false; // Not sending a response
+      }
+      return false; // Not handling this message
+    };
+
+    chrome.runtime.onMessage.addListener(handleMessage);
+    return () => chrome.runtime.onMessage.removeListener(handleMessage);
+  }, []);
+
+  useEffect(() => {
+    // Check for existing auth on startup
+    void (async () => {
+      try {
+        const stored = await getAuth();
+        console.log('[popup] Checking stored auth:', stored ? 'found' : 'none');
+        if (stored && stored.accessToken && stored.user) {
+          // Use stored auth directly - it was already validated when stored
+          setAuthState(stored);
+          setView('ready');
+        } else {
+          setView('auth');
+        }
+      } catch (e) {
+        console.error('[popup] Auth check failed:', e);
+        setError(e instanceof Error ? e.message : 'Session expired');
+        setView('auth');
+      }
+    })();
   }, []);
 
   if (view === 'loading') {
     return (
       <div className="app">
-        <div className="brand">Open<span>Jam</span></div>
+        <div className="brand">Velo<span>QA</span></div>
         <div className="muted">Checking session…</div>
       </div>
     );
@@ -120,53 +124,46 @@ function AuthForm({
   onDone: (a: AuthState) => void;
   initialError: string | null;
 }) {
-  const [apiKey, setApiKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(initialError);
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
+  async function openDashboardLogin() {
     setError(null);
     setBusy(true);
     try {
-      const trimmedKey = apiKey.trim();
-      if (!trimmedKey.startsWith('sc_')) {
-        throw new Error('Invalid API key format. Keys start with "sc_"');
-      }
-      const next = await bootstrapWithApiKey(trimmedKey);
-      onDone(next);
+      // Get the extension ID to construct callback URL
+      const extensionId = chrome.runtime.id;
+      const callbackUrl = `${DASHBOARD_URL}/extension-auth?extensionId=${extensionId}`;
+
+      // Open the dashboard sign-in page with callback parameter
+      await chrome.tabs.create({ url: callbackUrl });
+
+      // The popup will close, but we'll get the auth when it reopens
+      // after the user signs in and the callback is triggered
     } catch (e) {
       const msg = e instanceof ApiError ? e.message : e instanceof Error ? e.message : 'Failed';
       setError(msg);
-    } finally {
       setBusy(false);
     }
   }
 
   return (
     <div className="app">
-      <div className="brand">Open<span>Jam</span></div>
-      <p className="muted tiny">Enter your API key to start capturing</p>
-      <form className="stack" onSubmit={submit}>
-        <div>
-          <label>API Key</label>
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder="sc_..."
-            autoComplete="off"
-            required
-          />
-        </div>
-        <button className="primary" disabled={busy || !apiKey.trim()} type="submit">
-          {busy ? <span className="spinner" /> : 'Connect'}
+      <div className="brand">Velo<span>QA</span></div>
+      <p className="muted tiny">Sign in to start capturing</p>
+      <div className="stack">
+        <button
+          className="primary"
+          disabled={busy}
+          onClick={() => void openDashboardLogin()}
+        >
+          {busy ? <span className="spinner" /> : 'Sign in with Clerk'}
         </button>
-        <div className="error">{error}</div>
-      </form>
+        {error && <div className="error">{error}</div>}
+      </div>
       <div className="footer">
         <span className="tiny muted">
-          Get your API key from the dashboard Settings page
+          You'll be redirected to sign in via the dashboard
         </span>
       </div>
     </div>
@@ -405,7 +402,7 @@ function Ready({
 
   return (
     <div className="app">
-      <div className="brand">Open<span>Jam</span></div>
+      <div className="brand">Velo<span>QA</span></div>
       <div className="stack">
         <div>
           <label>Workspace</label>
@@ -481,7 +478,7 @@ function Ready({
               </span>
             </div>
             <button className="primary" onClick={() => void stopRecord()}>
-              Stop & create Jam
+              Stop & upload
             </button>
           </>
         )}
@@ -494,7 +491,7 @@ function Ready({
 
         {ui.kind === 'result' && ui.ok && ui.url && (
           <>
-            <div className="success">✓ Jam created</div>
+            <div className="success">✓ Recording saved</div>
             {ui.note && <div className="tiny muted">{ui.note}</div>}
             <a className="link" href={ui.url} target="_blank" rel="noreferrer">
               {ui.url}

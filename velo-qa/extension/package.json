@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite build --watch --mode development",
-    "build": "vite build",
+    "build": "vite build && node scripts/fix-offscreen.js",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit"
   },

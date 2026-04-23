@@ -3,9 +3,9 @@
 // popup can be closed/reopened during a recording.
 
 import { api, ApiError } from '../shared/api.js';
-import { getAuth } from '../shared/storage.js';
+import { getAuth, setAuth } from '../shared/storage.js';
 import { MSG } from '../types.js';
-import type { CapturePayload } from '../types.js';
+import type { AuthState, CapturePayload } from '../types.js';
 
 // ---------- types ----------
 type CaptureRequest = { kind: 'bg:capture'; workspaceId: string; title?: string };
@@ -57,6 +57,66 @@ let state: BgState = { kind: 'idle' };
 let lastError: { code: string; message: string; at: number } | null = null;
 /** Tab where the recording overlay was injected, so we can tear it down later. */
 let overlayTabId: number | null = null;
+
+// Storage key for persisting pending preview data (survives service worker restarts)
+const PENDING_PREVIEW_STORAGE_KEY = 'veloqa.pendingPreview';
+
+/** Persist pending-preview state to chrome.storage.local */
+async function persistPendingPreview(): Promise<void> {
+  if (state.kind !== 'pending-preview') return;
+  const data = {
+    workspaceId: state.workspaceId,
+    tabId: state.tabId,
+    dataUrl: state.dataUrl,
+    durationMs: state.durationMs,
+    bytes: state.bytes,
+    note: state.note,
+    capturedContext: state.capturedContext,
+    savedAt: Date.now(),
+  };
+  await chrome.storage.local.set({ [PENDING_PREVIEW_STORAGE_KEY]: data });
+  console.log('[veloqa/bg] persisted pending preview to storage');
+}
+
+/** Restore pending-preview state from chrome.storage.local */
+async function restorePendingPreview(): Promise<boolean> {
+  const result = await chrome.storage.local.get(PENDING_PREVIEW_STORAGE_KEY);
+  const data = result[PENDING_PREVIEW_STORAGE_KEY];
+  if (!data || !data.dataUrl) {
+    console.log('[veloqa/bg] no pending preview in storage to restore');
+    return false;
+  }
+  // Check if it's too old (more than 10 minutes)
+  if (Date.now() - data.savedAt > 10 * 60 * 1000) {
+    console.log('[veloqa/bg] pending preview in storage is too old, clearing');
+    await chrome.storage.local.remove(PENDING_PREVIEW_STORAGE_KEY);
+    return false;
+  }
+  state = {
+    kind: 'pending-preview',
+    workspaceId: data.workspaceId,
+    tabId: data.tabId,
+    dataUrl: data.dataUrl,
+    durationMs: data.durationMs,
+    bytes: data.bytes,
+    note: data.note,
+    capturedContext: data.capturedContext,
+  };
+  console.log('[veloqa/bg] restored pending preview from storage', {
+    dataUrlLength: data.dataUrl.length,
+    durationMs: data.durationMs,
+  });
+  return true;
+}
+
+/** Clear persisted pending preview from storage */
+async function clearPersistedPreview(): Promise<void> {
+  await chrome.storage.local.remove(PENDING_PREVIEW_STORAGE_KEY);
+  console.log('[veloqa/bg] cleared persisted pending preview');
+}
+
+// Restore state on service worker startup
+void restorePendingPreview();
 
 async function showOverlayOn(tabId: number, startedAt: number): Promise<void> {
   try {
@@ -203,32 +263,67 @@ function unsupported(tab: chrome.tabs.Tab): BgResponse | null {
 const OFFSCREEN_URL = chrome.runtime.getURL('src/offscreen/index.html');
 
 async function ensureOffscreen(): Promise<void> {
+  // First check if one already exists
   const existing = await chrome.runtime.getContexts({
     contextTypes: ['OFFSCREEN_DOCUMENT' as chrome.runtime.ContextType],
     documentUrls: [OFFSCREEN_URL],
   });
+
+  console.log('[veloqa/bg] existing offscreen contexts:', existing.length);
+
   if (!existing.length) {
     console.log('[veloqa/bg] creating offscreen', OFFSCREEN_URL);
-    await chrome.offscreen.createDocument({
-      url: OFFSCREEN_URL,
-      reasons: [
-        'USER_MEDIA' as chrome.offscreen.Reason,
-        'DISPLAY_MEDIA' as chrome.offscreen.Reason,
-      ],
-      justification: 'Record screen/tab with optional mic for a Jam',
-    });
-  }
-  // Wait for the offscreen doc's script to register its onMessage listener.
-  // createDocument resolves when the doc is loaded, but scripts may still be
-  // parsing — a ping handshake avoids losing the first `start` message.
-  for (let i = 0; i < 20; i++) {
     try {
-      const pong = await chrome.runtime.sendMessage({ target: 'offscreen', kind: 'ping' });
-      if (pong?.ok) return;
-    } catch {
-      // listener not yet registered; retry
+      await chrome.offscreen.createDocument({
+        url: OFFSCREEN_URL,
+        reasons: [
+          'USER_MEDIA' as chrome.offscreen.Reason,
+          'DISPLAY_MEDIA' as chrome.offscreen.Reason,
+        ],
+        justification: 'Record screen/tab with optional mic for a Jam',
+      });
+      console.log('[veloqa/bg] offscreen document created successfully');
+    } catch (createErr) {
+      console.error('[veloqa/bg] failed to create offscreen:', createErr);
+      throw createErr;
     }
-    await new Promise((r) => setTimeout(r, 50));
+  }
+
+  // Verify the offscreen document exists after creation
+  const afterCreate = await chrome.runtime.getContexts({
+    contextTypes: ['OFFSCREEN_DOCUMENT' as chrome.runtime.ContextType],
+  });
+  console.log('[veloqa/bg] offscreen contexts after create:', afterCreate.length, afterCreate.map(c => c.documentUrl));
+
+  if (!afterCreate.length) {
+    throw new Error('Offscreen document was not created');
+  }
+
+  // Wait for the offscreen doc's script to register its onMessage listener.
+  // The document exists but the script may still be loading.
+  // Use a ping-pong handshake to confirm it's ready.
+  for (let attempt = 0; attempt < 50; attempt++) {
+    await new Promise((r) => setTimeout(r, 100));
+    try {
+      const response = await new Promise<{ ok?: boolean } | undefined>((resolve) => {
+        const timeout = setTimeout(() => resolve(undefined), 200);
+        chrome.runtime.sendMessage({ target: 'offscreen', kind: 'ping' }, (resp) => {
+          clearTimeout(timeout);
+          if (chrome.runtime.lastError) {
+            console.log('[veloqa/bg] ping error:', chrome.runtime.lastError.message);
+            resolve(undefined);
+          } else {
+            resolve(resp);
+          }
+        });
+      });
+      if (response?.ok) {
+        console.log('[veloqa/bg] offscreen ready after', attempt + 1, 'pings');
+        return;
+      }
+    } catch (e) {
+      // Ignore errors, keep retrying
+    }
   }
   throw new Error('Offscreen document did not become ready');
 }
@@ -333,11 +428,29 @@ async function handleRecordStart(req: RecordStartReq): Promise<BgResponse> {
       ...startPayload,
       mic: req.withMic,
     });
-    const started: { ok: boolean; message?: string } | undefined = await chrome.runtime.sendMessage({
-      target: 'offscreen',
-      kind: 'start',
-      ...startPayload,
-      mic: req.withMic,
+    // Use callback-based sendMessage for more reliable async response handling
+    const started = await new Promise<{ ok: boolean; message?: string } | undefined>((resolve) => {
+      const timeout = setTimeout(() => {
+        console.log('[veloqa/bg] start message timed out');
+        resolve(undefined);
+      }, 10000); // 10 second timeout for user to grant permissions
+      chrome.runtime.sendMessage(
+        {
+          target: 'offscreen',
+          kind: 'start',
+          ...startPayload,
+          mic: req.withMic,
+        },
+        (response) => {
+          clearTimeout(timeout);
+          if (chrome.runtime.lastError) {
+            console.log('[veloqa/bg] start error:', chrome.runtime.lastError.message);
+            resolve({ ok: false, message: chrome.runtime.lastError.message ?? 'Unknown error' });
+          } else {
+            resolve(response);
+          }
+        }
+      );
     });
     console.log('[veloqa/bg] offscreen started?', started);
     if (!started?.ok) {
@@ -520,6 +633,9 @@ async function onRecordedFromOffscreen(msg: {
       ...(msg.note ? { note: msg.note } : {}),
     };
 
+    // Persist to storage so it survives service worker restarts
+    await persistPendingPreview();
+
     // Hide the recording pill; the preview modal takes over.
     await hideOverlayIfAny();
     await closeOffscreen();
@@ -563,10 +679,30 @@ async function onRecordedFromOffscreen(msg: {
  * with the captured context (collected at start + end of recording) and POST to /jams.
  */
 async function uploadPendingPreview(req: { title?: string }): Promise<BgResponse> {
+  console.log('[veloqa/bg] uploadPendingPreview called, state.kind:', state.kind);
+
+  // If state is idle, try to restore from storage (service worker may have restarted)
+  if (state.kind === 'idle') {
+    console.log('[veloqa/bg] uploadPendingPreview: state is idle, trying to restore from storage');
+    const restored = await restorePendingPreview();
+    if (!restored) {
+      console.log('[veloqa/bg] uploadPendingPreview: could not restore from storage');
+      return { ok: false, code: 'no_preview', message: 'Nothing to upload' };
+    }
+    console.log('[veloqa/bg] uploadPendingPreview: restored from storage successfully');
+  }
+
   if (state.kind !== 'pending-preview') {
+    console.log('[veloqa/bg] uploadPendingPreview: not in pending-preview state, returning error');
     return { ok: false, code: 'no_preview', message: 'Nothing to upload' };
   }
   const pending = state;
+  console.log('[veloqa/bg] uploadPendingPreview: pending state', {
+    hasDataUrl: !!pending.dataUrl,
+    dataUrlLength: pending.dataUrl?.length ?? 0,
+    durationMs: pending.durationMs,
+    bytes: pending.bytes,
+  });
   try {
     // Use the context we captured during recording, not fresh context
     // (user may have navigated away, reloaded, etc.)
@@ -592,6 +728,7 @@ async function uploadPendingPreview(req: { title?: string }): Promise<BgResponse
       media: { kind: 'video', dataUrl: pending.dataUrl },
     });
     state = { kind: 'idle' };
+    await clearPersistedPreview();
     return { ok: true, id: jam.id, url: jam.url, ...(pending.note ? { note: pending.note } : {}) };
   } catch (e) {
     if (e instanceof ApiError) return { ok: false, code: e.code, message: e.message };
@@ -601,6 +738,7 @@ async function uploadPendingPreview(req: { title?: string }): Promise<BgResponse
 
 function discardPendingPreview(): void {
   state = { kind: 'idle' };
+  void clearPersistedPreview();
   setError('discarded', 'Recording discarded');
 }
 
@@ -612,7 +750,12 @@ function onRecorderError(message: string): void {
 }
 
 // ---------- message router ----------
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Messages intended for offscreen - explicitly don't handle them here.
+  // Return false to indicate we're not sending an async response.
+  if (msg?.target === 'offscreen') {
+    return false;
+  }
   // Messages from offscreen have `target: 'bg'`.
   if (msg?.target === 'bg') {
     if (msg.kind === 'recorded') {
@@ -715,6 +858,33 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     );
     return true; // async
   }
+  // Handle auth token from dashboard content script
+  if (msg?.kind === 'auth-from-dashboard' && msg.token) {
+    console.log('[veloqa/bg] received auth-from-dashboard');
+    void (async () => {
+      try {
+        const user = await api.verifyClerkToken(msg.token);
+        const authState: AuthState = {
+          accessToken: msg.token,
+          user: { id: user.userId, email: user.email ?? '', name: user.name },
+          workspaces: [{ id: 'default', slug: 'default', name: 'My Recordings', role: 'owner' }],
+          activeWorkspaceId: 'default',
+        };
+        await setAuth(authState);
+        console.log('[veloqa/bg] auth stored successfully from dashboard');
+        sendResponse({ ok: true });
+        // Close the dashboard auth tab after successful auth
+        if (sender.tab?.id) {
+          console.log('[veloqa/bg] closing auth tab', sender.tab.id);
+          chrome.tabs.remove(sender.tab.id);
+        }
+      } catch (e) {
+        console.error('[veloqa/bg] auth-from-dashboard failed:', e);
+        sendResponse({ ok: false, error: e instanceof Error ? e.message : 'Auth failed' });
+      }
+    })();
+    return true; // async response
+  }
   return undefined;
 });
 
@@ -727,3 +897,31 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 // Suppress unused type warnings for the readonly state req type.
 void ({} as StateReq);
+
+// ---------- external messages (from dashboard) ----------
+// Handle Clerk auth callback from dashboard
+chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
+  if (msg?.kind === 'clerk-auth-callback' && msg.token) {
+    console.log('[veloqa/bg] received clerk-auth-callback from', sender.origin);
+    // Verify the token and store auth
+    void (async () => {
+      try {
+        const user = await api.verifyClerkToken(msg.token);
+        const authState: AuthState = {
+          accessToken: msg.token,
+          user: { id: user.userId, email: user.email ?? '', name: user.name },
+          workspaces: [{ id: 'default', slug: 'default', name: 'My Recordings', role: 'owner' }],
+          activeWorkspaceId: 'default',
+        };
+        await setAuth(authState);
+        console.log('[veloqa/bg] auth stored successfully');
+        sendResponse({ ok: true });
+      } catch (e) {
+        console.error('[veloqa/bg] clerk-auth-callback failed:', e);
+        sendResponse({ ok: false, error: e instanceof Error ? e.message : 'Auth failed' });
+      }
+    })();
+    return true; // async response
+  }
+  return false;
+});

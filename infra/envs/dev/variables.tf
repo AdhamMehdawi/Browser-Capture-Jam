@@ -27,5 +27,5 @@ variable "env" {
 # deploys, or bake the build pipeline to set it automatically.
 variable "api_image" {
   type    = string
-  default = "velocapcr.azurecr.io/api-server:09d89c8-fix2"
+  default = "velocapcr.azurecr.io/api-server:671703c"
 }

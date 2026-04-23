@@ -117,8 +117,8 @@ resource "azurerm_key_vault_secret" "acr_password" {
   key_vault_id = module.key_vault.id
 }
 
-# Placeholders — fill these via `terraform apply -var clerk_secret_key=...`
-# or set them manually in the portal. Kept here so the contract is visible.
+# Placeholders — their VALUES are set out-of-band via `az keyvault secret set`
+# and we `ignore_changes` so TF doesn't fight the out-of-band writes.
 resource "azurerm_key_vault_secret" "clerk_secret_key" {
   name         = "clerk-secret-key"
   value        = "REPLACE_ME"
@@ -137,6 +137,21 @@ resource "azurerm_key_vault_secret" "clerk_publishable_key" {
   lifecycle {
     ignore_changes = [value]
   }
+}
+
+# Read the LIVE values from KV so `terraform apply` picks up any
+# out-of-band updates (from `az keyvault secret set`). These are what
+# actually flow into the Container App's secret store.
+data "azurerm_key_vault_secret" "clerk_secret_key_live" {
+  name         = "clerk-secret-key"
+  key_vault_id = module.key_vault.id
+  depends_on   = [azurerm_key_vault_secret.clerk_secret_key]
+}
+
+data "azurerm_key_vault_secret" "clerk_publishable_key_live" {
+  name         = "clerk-publishable-key"
+  key_vault_id = module.key_vault.id
+  depends_on   = [azurerm_key_vault_secret.clerk_publishable_key]
 }
 
 # -----------------------------------------------------------------------------
@@ -169,9 +184,6 @@ module "api" {
   env_vars = [
     { name = "NODE_ENV", value = "development" },
     { name = "PORT", value = "4000" },
-    # MOCK_AUTH bypasses Clerk entirely while Clerk keys in KV are still
-    # placeholders. Remove once real keys are set via `az keyvault secret set`.
-    { name = "MOCK_AUTH", value = "true" },
   ]
 
   env_secret_refs = [
@@ -185,8 +197,8 @@ module "api" {
   secrets = [
     { name = "database-url", value = azurerm_key_vault_secret.postgres_url.value },
     { name = "storage-connection-string", value = module.storage.primary_connection_string },
-    { name = "clerk-secret-key", value = azurerm_key_vault_secret.clerk_secret_key.value },
-    { name = "clerk-publishable-key", value = azurerm_key_vault_secret.clerk_publishable_key.value },
+    { name = "clerk-secret-key", value = data.azurerm_key_vault_secret.clerk_secret_key_live.value },
+    { name = "clerk-publishable-key", value = data.azurerm_key_vault_secret.clerk_publishable_key_live.value },
     { name = "appi-connection-string", value = module.app_insights.connection_string },
   ]
 

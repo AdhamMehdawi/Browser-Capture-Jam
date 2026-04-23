@@ -7,9 +7,14 @@ Living status of the Azure deployment. Update after any meaningful change
 
 ---
 
-## ⏸ PAUSED — waiting on parallel branch
+## ✅ Phase 5 unpaused and completed (2026-04-23)
 
-**As of 2026-04-22**: Phase 5 is paused mid-flight because a **Clerk application is being set up by another developer on a separate branch**. When that branch merges, we'll have real `CLERK_SECRET_KEY` + `CLERK_PUBLISHABLE_KEY` values and can finish Phase 5.
+Parallel Clerk branch merged via `git merge origin/main` on 2026-04-23 (merge commit `671703c`). Real keys written to KV, Terraform switched from placeholder-inline secrets to **KV data sources** (so future `az keyvault secret set` updates propagate on next apply without TF fighting back). `MOCK_AUTH` removed. Dashboard rebuilt with real `VITE_CLERK_PUBLISHABLE_KEY` + redeployed.
+
+Post-Clerk verification:
+- `GET /api/healthz` → 200 (public, unchanged)
+- `GET /api/recordings` → **401 Unauthorized** (Clerk now properly gating — was 200 under MOCK_AUTH)
+- Dashboard bundle now contains the real Clerk pk; browser Clerk init should succeed
 
 **What the merging developer (or reviewer) needs to know:**
 - Branch `deployment` at commit `7189cdf` contains all the Azure deployment work.
@@ -130,13 +135,10 @@ Known follow-ups (do NOT block Phase 5):
   ```
   Live at https://salmon-sea-0c8c28b03.7.azurestaticapps.net (HTTP 200, serves HTML+JS+CSS).
 - ⚠️ **Dashboard Clerk init will fail in-browser** until real `VITE_CLERK_PUBLISHABLE_KEY` is baked in at build time.
-- ⬜ Set Clerk keys in KV:
-  `az keyvault secret set --vault-name velocap-kv-dev --name clerk-secret-key --value sk_test_...`
-  `az keyvault secret set --vault-name velocap-kv-dev --name clerk-publishable-key --value pk_test_...`
-- ⬜ Remove `MOCK_AUTH=true` from Terraform + restart ACA revision
-- ⬜ `vite build` the dashboard with `VITE_API_URL=https://velocap-api-dev...azurecontainerapps.io`
-- ⬜ Deploy build output to `velocap-swa-dev` (SWA CLI or GitHub Action)
-- ⬜ Smoke test: log in via Clerk → dashboard loads → API `/api/me` returns 200
+- ✅ Clerk keys set in KV via `az keyvault secret set` (2026-04-23)
+- ✅ `MOCK_AUTH` removed from Terraform; ACA revision rolled to `671703c` image with live Clerk secrets read via KV data sources
+- ✅ Dashboard rebuilt with real `VITE_CLERK_PUBLISHABLE_KEY` + redeployed to `velocap-swa-dev`
+- ⬜ **Browser smoke test** — open https://salmon-sea-0c8c28b03.7.azurestaticapps.net, sign in with Clerk, verify `/api/me` + recordings list. (Requires a human; can't do from CLI.)
 - ⬜ Remove laptop Postgres firewall rule `tareq-laptop-temp` (left in place for active dev; re-add with `az postgres flexible-server firewall-rule create -g VeloCap -n velocap-pg-dev --rule-name tareq-laptop-temp --start-ip-address $(curl -s https://api.ipify.org) --end-ip-address $(curl -s https://api.ipify.org)`)
 
 ### Phase 6 — Prod env ⬜
@@ -191,6 +193,7 @@ Resource group **`velocap-tfstate-rg`** (uaenorth):
 
 ## Changelog
 
+- **2026-04-23** — Phase 5 completed. Merged `origin/main` into `deployment` (merge commit `671703c`) to pick up Clerk integration. Added KV data sources so the live secret values flow into the ACA secret store on each apply. MOCK_AUTH removed; `/api/recordings` now correctly returns 401 without a Clerk session. Dashboard rebuilt with real publishable key and redeployed to SWA. Flagged: `.env` files with real `sk_test_*` key are in git history (pk_test_* matches test Clerk instance `firm-tapir-95`; rotation is a separate follow-up).
 - **2026-04-22** — Dashboard built + deployed to `velocap-swa-dev` via SWA CLI. Serving HTML at https://salmon-sea-0c8c28b03.7.azurestaticapps.net. Clerk key still a placeholder — in-browser auth won't work until rebuilt with the real publishable key.
 - **2026-04-22** — Phase 5 started. Drizzle schema pushed to `velocap-pg-dev`; `GET /api/recordings` returns real data end-to-end. Postgres admin password regenerated without special chars after `random_password` default tripped URL parsing in the pg driver. Laptop firewall rule `tareq-laptop-temp` added for dev-time DB access.
 - **2026-04-22** — Phase 4 done. api-server image `09d89c8-fix2` pushed to `velocapcr`, running in `velocap-api-dev`, `/api/healthz` returning 200. Option A (SnapCap stack) locked after realizing velo-qa/server + snapcap-dashboard + velo-qa/extension mix wasn't coherent. Decision was triggered by the user sharing the "Summary Table" image.

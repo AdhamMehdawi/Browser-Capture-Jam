@@ -33,7 +33,12 @@ export default defineManifest({
     },
     {
       // Auth callback script that runs on the dashboard to pick up auth tokens
-      matches: ['http://localhost:3001/*', 'https://*.veloqa.com/*'],
+      matches: [
+        'http://localhost:3001/*',
+        'https://*.veloqa.com/*',
+        'https://salmon-sea-0c8c28b03.7.azurestaticapps.net/*',
+        'https://ambitious-wave-08351ef03.7.azurestaticapps.net/*',
+      ],
       js: ['src/content/auth-callback.ts'],
       run_at: 'document_idle',
       all_frames: false,
@@ -52,7 +57,12 @@ export default defineManifest({
   host_permissions: ['<all_urls>', 'http://localhost:4000/*'],
   // Allow dashboard to send messages to the extension for Clerk auth callback
   externally_connectable: {
-    matches: ['http://localhost:3001/*', 'https://*.veloqa.com/*'],
+    matches: [
+      'http://localhost:3001/*',
+      'https://*.veloqa.com/*',
+      'https://salmon-sea-0c8c28b03.7.azurestaticapps.net/*',
+      'https://ambitious-wave-08351ef03.7.azurestaticapps.net/*',
+    ],
   },
   web_accessible_resources: [
     {

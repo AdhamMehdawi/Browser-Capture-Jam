@@ -143,11 +143,16 @@ Known follow-ups (do NOT block Phase 5):
   - Clerk session cookies don't cross origins; added `ClerkApiTokenBridge` in `App.tsx` to pass Clerk JWT via `Authorization` header (commit `df517a7`)
 - ⬜ Remove laptop Postgres firewall rule `tareq-laptop-temp` (left in place for active dev; re-add with `az postgres flexible-server firewall-rule create -g VeloCap -n velocap-pg-dev --rule-name tareq-laptop-temp --start-ip-address $(curl -s https://api.ipify.org) --end-ip-address $(curl -s https://api.ipify.org)`)
 
-### Phase 6 — Prod env ⬜
-- ⬜ Create `infra/envs/prod/` as a near-copy of `dev/`, with `-prod` suffixes + `min_replicas = 1` on the API
-- ⬜ `terraform init && terraform apply` for prod
-- ⬜ Push same image tag to `velocap-api-prod`
-- ⬜ Deploy dashboard build (different `VITE_API_URL`) to `velocap-swa-prod`
+### Phase 6 — Prod env ✅
+- ✅ Created `infra/envs/prod/` composing the same 9 modules; 18 resources applied to UAE North
+- ✅ ACR shared via data source; LAW / KV / Storage / Postgres / ACA env / ACA / SWA all separate (`-prod` suffix)
+- ✅ Drizzle schema pushed to `velocap-pg-prod`
+- ✅ Clerk secrets (same test keys for now) in `velocap-kv-prod`
+- ✅ Dashboard built with prod `VITE_API_URL` + redeployed to `velocap-swa-prod`
+- ✅ Smoke test: `/api/healthz` → 200; `/api/recordings` → 401 (Clerk gating working)
+- ⚠️ **NODE_ENV=development** on prod ACA — Clerk Express rejects `pk_test_*`/`sk_test_*` keys when NODE_ENV=production. Flip to "production" once a live Clerk instance (`pk_live_*`) is provisioned.
+- ⚠️ `tareq-laptop-temp` firewall rule added to `velocap-pg-prod` (same IP as dev)
+- ⚠️ Branch push to origin blocked — Tareq has no write access to `AdhamMehdawi/Browser-Capture-Jam`. Needs collaborator invite or fork-and-PR flow.
 
 ### Phase 7 — CI/CD + alerts + extension ⬜
 - ⬜ GitHub Actions OIDC federated credentials (Entra app reg)
@@ -195,6 +200,7 @@ Resource group **`velocap-tfstate-rg`** (uaenorth):
 
 ## Changelog
 
+- **2026-04-23** — **Phase 6 done.** Prod env `envs/prod/` stood up (18 resources). ACR shared with dev via data source. Hit one gotcha: Clerk Express refuses `sk_test_*` keys when NODE_ENV=production — left prod with NODE_ENV=development until a live Clerk instance exists. Dev + prod dashboards deployed, both sign-in working with the same test Clerk instance. Branch push to origin blocked on GitHub permissions (Tareq not a collaborator on AdhamMehdawi/Browser-Capture-Jam).
 - **2026-04-23** — **Phase 5 fully done.** Browser smoke test passed after two fixes: (1) `main.tsx` now calls `setBaseUrl(VITE_API_URL)` — without it, dashboard was calling relative `/api/*` which hit the SWA origin and 404'd (`9c9b3e4`). (2) Added `ClerkApiTokenBridge` in `App.tsx` to wire Clerk's `useAuth().getToken()` into the custom-fetch auth-token getter, so every API call carries `Authorization: Bearer <JWT>` (`df517a7`). Clerk session cookies don't cross the SWA↔ACA origin boundary; JWT-in-header pattern is the standard cross-origin workaround.
 - **2026-04-23** — Phase 5 unpaused. Merged `origin/main` into `deployment` (merge commit `671703c`) to pick up Clerk integration. Added KV data sources so the live secret values flow into the ACA secret store on each apply. MOCK_AUTH removed; `/api/recordings` now correctly returns 401 without a Clerk session. Dashboard rebuilt with real publishable key and redeployed to SWA. Flagged: `.env` files with real `sk_test_*` key are in git history (pk_test_* matches test Clerk instance `firm-tapir-95`; rotation is a separate follow-up).
 - **2026-04-22** — Dashboard built + deployed to `velocap-swa-dev` via SWA CLI. Serving HTML at https://salmon-sea-0c8c28b03.7.azurestaticapps.net. Clerk key still a placeholder — in-browser auth won't work until rebuilt with the real publishable key.

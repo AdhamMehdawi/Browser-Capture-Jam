@@ -94,6 +94,49 @@ router.post("/me/api-key", requireAuth, async (req: any, res) => {
 });
 
 /**
+ * POST /auth/verify-clerk-token
+ *
+ * Validates a Clerk JWT token and returns user info. Used by the Chrome extension
+ * to authenticate using Clerk session.
+ */
+router.post("/auth/verify-clerk-token", requireAuth, async (req: any, res) => {
+  try {
+    const userId = req.userId;
+
+    // Get user info from Clerk if available
+    let email: string | null = null;
+    let firstName: string | null = null;
+    let lastName: string | null = null;
+
+    if (clerkClient) {
+      try {
+        const clerk = await clerkClient();
+        const clerkUser = await clerk.users.getUser(userId);
+        email = clerkUser.emailAddresses[0]?.emailAddress ?? null;
+        firstName = clerkUser.firstName;
+        lastName = clerkUser.lastName;
+      } catch {}
+    }
+
+    // Mock user data for local development
+    if (MOCK_AUTH && !email) {
+      email = "mo@menatal.com";
+      firstName = "Mohammad";
+      lastName = "Makhamreh";
+    }
+
+    res.json({
+      userId,
+      email,
+      name: firstName && lastName ? `${firstName} ${lastName}` : firstName || lastName || null,
+    });
+  } catch (err) {
+    req.log.error({ err }, "Failed to verify Clerk token");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/**
  * POST /auth/verify-api-key
  *
  * Validates an API key and returns user info. Used by the Chrome extension

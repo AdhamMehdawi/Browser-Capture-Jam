@@ -1,14 +1,18 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { Readable } from "stream";
+import path from "path";
+import fs from "fs";
 import {
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
 } from "@workspace/api-zod";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
-import { ObjectPermission } from "../lib/objectAcl";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
+
+// Local media directory for development
+const LOCAL_MEDIA_DIR = path.join(process.cwd(), ".data", "media");
 
 /**
  * POST /storage/uploads/request-url
@@ -78,6 +82,33 @@ router.get("/storage/public-objects/*filePath", async (req: Request, res: Respon
 });
 
 /**
+ * GET /storage/local/*
+ *
+ * Serve locally stored media files (for development).
+ * These files are stored by the /jams endpoint.
+ */
+router.get("/storage/local/:filename", (req: Request, res: Response) => {
+  const rawFilename = req.params.filename;
+  const filename = Array.isArray(rawFilename) ? rawFilename[0] : rawFilename;
+  const filePath = path.join(LOCAL_MEDIA_DIR, filename);
+
+  if (!fs.existsSync(filePath)) {
+    res.status(404).json({ error: "Media not found" });
+    return;
+  }
+
+  // Determine content type
+  let contentType = "application/octet-stream";
+  if (filename.endsWith(".png")) contentType = "image/png";
+  else if (filename.endsWith(".jpg") || filename.endsWith(".jpeg")) contentType = "image/jpeg";
+  else if (filename.endsWith(".webm")) contentType = "video/webm";
+  else if (filename.endsWith(".mp4")) contentType = "video/mp4";
+
+  res.setHeader("Content-Type", contentType);
+  fs.createReadStream(filePath).pipe(res);
+});
+
+/**
  * GET /storage/objects/*
  *
  * Serve object entities from PRIVATE_OBJECT_DIR.
@@ -88,6 +119,28 @@ router.get("/storage/objects/*path", async (req: Request, res: Response) => {
   try {
     const raw = req.params.path;
     const wildcardPath = Array.isArray(raw) ? raw.join("/") : raw;
+
+    // Handle local files (stored by /jams endpoint)
+    if (wildcardPath.startsWith("local/")) {
+      const filename = wildcardPath.replace("local/", "");
+      const filePath = path.join(LOCAL_MEDIA_DIR, filename);
+
+      if (!fs.existsSync(filePath)) {
+        res.status(404).json({ error: "Media not found" });
+        return;
+      }
+
+      let contentType = "application/octet-stream";
+      if (filename.endsWith(".png")) contentType = "image/png";
+      else if (filename.endsWith(".jpg") || filename.endsWith(".jpeg")) contentType = "image/jpeg";
+      else if (filename.endsWith(".webm")) contentType = "video/webm";
+      else if (filename.endsWith(".mp4")) contentType = "video/mp4";
+
+      res.setHeader("Content-Type", contentType);
+      fs.createReadStream(filePath).pipe(res);
+      return;
+    }
+
     const objectPath = `/objects/${wildcardPath}`;
     const objectFile = await objectStorageService.getObjectEntityFile(objectPath);
 

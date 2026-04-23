@@ -16,6 +16,13 @@ interface PreviewState {
 
 const main = document.getElementById('main') as HTMLElement;
 const metaEl = document.getElementById('meta') as HTMLElement;
+const closeHeaderBtn = document.getElementById('close-header') as HTMLButtonElement;
+
+// Close button in header - discards recording and closes
+closeHeaderBtn.addEventListener('click', async () => {
+  await chrome.runtime.sendMessage({ kind: 'bg:preview-discard' });
+  window.close();
+});
 
 function fmtDuration(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
@@ -165,25 +172,35 @@ function render(state: PreviewState): void {
       title: titleInput.value.trim() || undefined,
     });
     if (res?.ok) {
-      setStatus('✓ Uploaded', 'ok');
-      const link = document.createElement('a');
-      link.className = 'link';
-      link.href = res.url;
-      link.target = '_blank';
-      link.rel = 'noreferrer';
-      link.textContent = res.url;
-      main.appendChild(link);
-      const row = document.createElement('div');
-      row.className = 'row right';
-      row.innerHTML = `
-        <button id="close">Close tab</button>
-        <button id="open" class="primary">Open Jam</button>
-      `;
-      main.appendChild(row);
-      (row.querySelector('#open') as HTMLElement).addEventListener('click', () =>
-        window.open(res.url, '_blank'),
-      );
-      (row.querySelector('#close') as HTMLElement).addEventListener('click', () => window.close());
+      // Copy URL to clipboard automatically
+      try {
+        await navigator.clipboard.writeText(res.url);
+        setStatus('✓ Uploaded & copied to clipboard!', 'ok');
+      } catch {
+        setStatus('✓ Uploaded', 'ok');
+      }
+
+      // Update the buttons - hide old ones and show new actions
+      uploadBtn.textContent = 'Open Jam';
+      uploadBtn.disabled = false;
+      uploadBtn.onclick = () => window.open(res.url, '_blank');
+
+      discardBtn.textContent = 'Close';
+      discardBtn.className = 'ghost';
+      discardBtn.disabled = false;
+      discardBtn.onclick = () => window.close();
+
+      downloadBtn.textContent = 'Copy Link';
+      downloadBtn.disabled = false;
+      downloadBtn.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(res.url);
+          downloadBtn.textContent = '✓ Copied!';
+          setTimeout(() => { downloadBtn.textContent = 'Copy Link'; }, 2000);
+        } catch {
+          setStatus('Failed to copy', 'err');
+        }
+      };
     } else {
       setStatus(res?.message || 'Upload failed', 'err');
       uploadBtn.disabled = false;

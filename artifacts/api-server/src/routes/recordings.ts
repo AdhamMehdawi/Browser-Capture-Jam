@@ -294,6 +294,44 @@ router.delete("/recordings/:id/share", async (req: any, res) => {
 });
 
 function sanitizeRecording(r: typeof recordingsTable.$inferSelect) {
+  // Handle tags - Drizzle with SQLite returns malformed data when schema
+  // uses .array() but SQLite stores as TEXT. Parse carefully.
+  let tags: string[] = [];
+  const rawTags = r.tags as unknown;
+  if (Array.isArray(rawTags)) {
+    // If it looks like a character array from JSON (e.g., ['[', ']']), reconstruct and parse
+    const allSingleChars = rawTags.every((t: unknown) => typeof t === 'string' && t.length === 1);
+    if (allSingleChars && rawTags.length > 0) {
+      const joined = rawTags.join('');
+      try {
+        const parsed = JSON.parse(joined);
+        tags = Array.isArray(parsed) ? parsed.filter((t: unknown) => typeof t === 'string') : [];
+      } catch {
+        tags = [];
+      }
+    } else {
+      // Proper array of tag strings
+      tags = rawTags.filter((t: unknown) => typeof t === 'string' && t.length > 1);
+    }
+  } else if (typeof rawTags === 'string') {
+    try {
+      const parsed = JSON.parse(rawTags);
+      tags = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      tags = [];
+    }
+  }
+
+  // Handle browserInfo - could be object or JSON string
+  let browserInfo = r.browserInfo;
+  if (typeof browserInfo === 'string') {
+    try {
+      browserInfo = JSON.parse(browserInfo);
+    } catch {
+      browserInfo = null;
+    }
+  }
+
   return {
     id: r.id,
     userId: r.userId,
@@ -308,8 +346,8 @@ function sanitizeRecording(r: typeof recordingsTable.$inferSelect) {
     clickCount: r.clickCount,
     videoObjectPath: r.videoObjectPath,
     shareToken: r.shareToken,
-    tags: r.tags,
-    browserInfo: r.browserInfo,
+    tags,
+    browserInfo,
   };
 }
 

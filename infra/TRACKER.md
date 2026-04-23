@@ -154,13 +154,11 @@ Known follow-ups (do NOT block Phase 5):
 - ⚠️ `tareq-laptop-temp` firewall rule added to `velocap-pg-prod` (same IP as dev)
 - ⚠️ Branch push to origin blocked — Tareq has no write access to `AdhamMehdawi/Browser-Capture-Jam`. Needs collaborator invite or fork-and-PR flow.
 
-### Phase 7 — CI/CD + alerts + extension ⬜
-- ⬜ GitHub Actions OIDC federated credentials (Entra app reg)
-- ⬜ `.github/workflows/terraform-plan.yml` on PR
-- ⬜ `.github/workflows/deploy-dev.yml` on push to `deployment`
-- ⬜ `.github/workflows/deploy-prod.yml` on tag / manual dispatch
-- ⬜ Alert rules: ACA 5xx > 2% / 5m, Postgres CPU > 80% / 10m, KV secret near-expiry, monthly cost > 80% of budget
-- ⬜ Rebuild extension with `VITE_API_URL=<prod api>`, re-publish to Chrome Web Store
+### Phase 7 — CI/CD + alerts + extension
+- 🟨 **7.1 GitHub Actions CI/CD** — workflows + runbook committed (`ca011aa`), NOT active. Blocked on: (a) Adham adding Tareq as GH collaborator, (b) Malak/Aref creating the Entra app reg + role assignments. See `infra/CICD-SETUP.md`.
+- ✅ **7.2 Alerts + budget** — prod action group (emails Tareq + info), alert on ACA replicas=0 and Postgres CPU>80%/15m, $100/mo RG budget with 50/80/100% thresholds. Applied via TF, verified via `az monitor metrics alert list` + `az consumption budget list`.
+- ✅ **7.3 Extension build** — release-mode dev build zipped (`velocap-extension-dev.zip`), privacy policy hosted at `/privacy.html`, CWS submission reference at `velo-qa/extension/CWS-SUBMISSION.md`.
+- ⬜ 7.3b — Re-build extension for prod + re-publish once dev listing is approved and workflow is validated.
 
 ---
 
@@ -200,6 +198,10 @@ Resource group **`velocap-tfstate-rg`** (uaenorth):
 
 ## Changelog
 
+- **2026-04-23** — Phase 7.2 done. Prod alerts + $100/mo RG budget applied. Action group emails tareq@ + info@. Alerts for ACA replica=0 and Postgres CPU>80% sustained 15m. Budget thresholds at 50/80/100% actual.
+- **2026-04-23** — Phase 7.1 assets drafted — 3 GH Actions workflows + `infra/CICD-SETUP.md` runbook committed on `deployment` branch. NOT active. Two human blockers remain (Adham → add Tareq as collaborator; Malak/Aref → create Entra app reg + assign roles).
+- **2026-04-23** — Durability fix (`b584267`) deployed to dev + prod. Recordings now persist to Azure Blob; survive container restarts.
+- **2026-04-23** — Extension for CWS submission: release-mode build strips localhost, name renamed `Velo QA → VeloCap` in manifest, privacy policy hosted at dashboard `/privacy.html`, zipped package + submission reference doc ready. Waiting on Tareq to finish CWS form + get review.
 - **2026-04-23** — **Phase 6 done.** Prod env `envs/prod/` stood up (18 resources). ACR shared with dev via data source. Hit one gotcha: Clerk Express refuses `sk_test_*` keys when NODE_ENV=production — left prod with NODE_ENV=development until a live Clerk instance exists. Dev + prod dashboards deployed, both sign-in working with the same test Clerk instance. Branch push to origin blocked on GitHub permissions (Tareq not a collaborator on AdhamMehdawi/Browser-Capture-Jam).
 - **2026-04-23** — **Phase 5 fully done.** Browser smoke test passed after two fixes: (1) `main.tsx` now calls `setBaseUrl(VITE_API_URL)` — without it, dashboard was calling relative `/api/*` which hit the SWA origin and 404'd (`9c9b3e4`). (2) Added `ClerkApiTokenBridge` in `App.tsx` to wire Clerk's `useAuth().getToken()` into the custom-fetch auth-token getter, so every API call carries `Authorization: Bearer <JWT>` (`df517a7`). Clerk session cookies don't cross the SWA↔ACA origin boundary; JWT-in-header pattern is the standard cross-origin workaround.
 - **2026-04-23** — Phase 5 unpaused. Merged `origin/main` into `deployment` (merge commit `671703c`) to pick up Clerk integration. Added KV data sources so the live secret values flow into the ACA secret store on each apply. MOCK_AUTH removed; `/api/recordings` now correctly returns 401 without a Clerk session. Dashboard rebuilt with real publishable key and redeployed to SWA. Flagged: `.env` files with real `sk_test_*` key are in git history (pk_test_* matches test Clerk instance `firm-tapir-95`; rotation is a separate follow-up).

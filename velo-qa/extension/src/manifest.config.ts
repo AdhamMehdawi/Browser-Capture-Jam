@@ -1,5 +1,22 @@
 import { defineManifest } from '@crxjs/vite-plugin';
 
+// EXT_BUILD_MODE=release strips localhost URLs from externally_connectable,
+// content script matches, and host_permissions — required for a clean Chrome
+// Web Store review. Default (no env var) keeps the dev-friendly listing.
+const isRelease = process.env.EXT_BUILD_MODE === 'release';
+
+const dashboardOrigins = [
+  ...(isRelease ? [] : ['http://localhost:3001/*']),
+  'https://*.veloqa.com/*',
+  'https://salmon-sea-0c8c28b03.7.azurestaticapps.net/*',
+  'https://ambitious-wave-08351ef03.7.azurestaticapps.net/*',
+];
+
+const hostPermissions = [
+  '<all_urls>',
+  ...(isRelease ? [] : ['http://localhost:4000/*']),
+];
+
 export default defineManifest({
   manifest_version: 3,
   name: 'Velo QA',
@@ -33,12 +50,7 @@ export default defineManifest({
     },
     {
       // Auth callback script that runs on the dashboard to pick up auth tokens
-      matches: [
-        'http://localhost:3001/*',
-        'https://*.veloqa.com/*',
-        'https://salmon-sea-0c8c28b03.7.azurestaticapps.net/*',
-        'https://ambitious-wave-08351ef03.7.azurestaticapps.net/*',
-      ],
+      matches: dashboardOrigins,
       js: ['src/content/auth-callback.ts'],
       run_at: 'document_idle',
       all_frames: false,
@@ -54,15 +66,10 @@ export default defineManifest({
     'offscreen',
     'downloads',
   ],
-  host_permissions: ['<all_urls>', 'http://localhost:4000/*'],
+  host_permissions: hostPermissions,
   // Allow dashboard to send messages to the extension for Clerk auth callback
   externally_connectable: {
-    matches: [
-      'http://localhost:3001/*',
-      'https://*.veloqa.com/*',
-      'https://salmon-sea-0c8c28b03.7.azurestaticapps.net/*',
-      'https://ambitious-wave-08351ef03.7.azurestaticapps.net/*',
-    ],
+    matches: dashboardOrigins,
   },
   web_accessible_resources: [
     {

@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>VeloCap — Privacy Policy</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1.5rem; color: #222; line-height: 1.6; }
+  h1 { margin-top: 0; }
+  h2 { margin-top: 2rem; border-bottom: 1px solid #eee; padding-bottom: .25rem; }
+  code { background: #f4f4f4; padding: .1rem .3rem; border-radius: .2rem; }
+  footer { color: #888; font-size: .9rem; margin-top: 3rem; }
+</style>
+</head>
+<body>
+<h1>VeloCap — Privacy Policy</h1>
+<p><em>Last updated: 2026-04-23</em></p>
+
+<p>VeloCap is a developer tool distributed as a Chrome extension and an accompanying web dashboard. This policy explains what data the extension collects, how it is used, and the choices you have.</p>
+
+<h2>What the extension captures</h2>
+<p>The extension only captures data when <strong>you explicitly click "Record"</strong>. While recording, on the tab you select, it captures:</p>
+<ul>
+  <li>A screen recording of that tab</li>
+  <li>Console log output from that tab</li>
+  <li>Outbound network requests and their responses from that tab</li>
+  <li>User interactions on that tab (clicks, input events, navigations) — <em>input values are masked</em></li>
+  <li>Page URL and title, referrer, and basic browser/device metadata (user agent, viewport, language, timezone)</li>
+</ul>
+<p>The extension does <strong>not</strong> run background data collection. It does not read browsing history, cookies, passwords, or data from tabs other than the one you actively record.</p>
+
+<h2>Authentication</h2>
+<p>To upload recordings to your VeloCap account, you sign in via <a href="https://clerk.com">Clerk</a>. Clerk stores your email, name, and (if you choose) your Google profile. The extension only receives a session token from Clerk; it does not see your password.</p>
+
+<h2>Where data is stored</h2>
+<p>Recordings are uploaded to servers hosted on <strong>Microsoft Azure</strong> in the <strong>UAE North</strong> region. Specifically:</p>
+<ul>
+  <li>Recording metadata, console/network logs, and user-action trails are stored in a private PostgreSQL database.</li>
+  <li>Video and screenshot binaries are stored in Azure Blob Storage.</li>
+  <li>Access is gated by your Clerk-authenticated session.</li>
+</ul>
+
+<h2>Who can access your recordings</h2>
+<p>By default, only the user who created a recording can view it. A recording becomes accessible to others only if <strong>you explicitly generate and share a share link</strong>. Share links can be revoked at any time from the dashboard.</p>
+
+<h2>Third parties</h2>
+<p>VeloCap uses these third-party services:</p>
+<ul>
+  <li><strong>Clerk</strong> — authentication (<a href="https://clerk.com/privacy">Clerk privacy policy</a>)</li>
+  <li><strong>Microsoft Azure</strong> — hosting (<a href="https://privacy.microsoft.com/privacystatement">Microsoft privacy statement</a>)</li>
+</ul>
+<p>VeloCap does not sell, rent, or share your data with advertisers or any other third parties.</p>
+
+<h2>Retention and deletion</h2>
+<p>Recordings remain until you delete them from the dashboard. You can delete any of your recordings at any time. When you delete a recording, its database row and associated video/screenshot blobs are removed.</p>
+
+<h2>Your rights</h2>
+<p>You can:</p>
+<ul>
+  <li>View and delete any of your recordings from the dashboard</li>
+  <li>Revoke any share links you have generated</li>
+  <li>Request full account deletion by contacting the email below</li>
+</ul>
+
+<h2>Contact</h2>
+<p>For privacy questions or account-deletion requests: <a href="mailto:info@menatal.com">info@menatal.com</a></p>
+
+<footer>
+  This policy applies to the VeloCap Chrome extension and the VeloCap dashboard. It does not apply to the websites you record — those are governed by their own policies.
+</footer>
+</body>
+</html>

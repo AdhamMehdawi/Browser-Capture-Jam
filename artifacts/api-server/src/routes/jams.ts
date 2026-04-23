@@ -1,24 +1,11 @@
 import { Router } from "express";
 import { randomUUID } from "crypto";
 import { requireAuth } from "../middlewares/requireAuth";
-import path from "path";
-import fs from "fs";
 import { db, recordingsTable } from "@workspace/db";
+import { ObjectStorageService } from "../lib/objectStorage";
 
 const router = Router();
-
-// Local storage mode - originally for Replit development.
-// On ACA / any read-only FS this fails; swallow the error so the server still
-// boots. /jams upload endpoints will fail until this is reworked to use Azure
-// Blob (tracked in infra/TRACKER.md as follow-up work).
-const LOCAL_MEDIA_DIR = path.join(process.cwd(), ".data", "media");
-try {
-  if (!fs.existsSync(LOCAL_MEDIA_DIR)) {
-    fs.mkdirSync(LOCAL_MEDIA_DIR, { recursive: true });
-  }
-} catch (err) {
-  console.warn("[jams] local media dir not writable; /jams uploads will fail:", err);
-}
+const objectStorageService = new ObjectStorageService();
 
 /**
  * POST /jams
@@ -123,40 +110,34 @@ router.post("/jams", requireAuth, async (req: any, res) => {
       errors: errorCount,
     });
 
-    // Handle video/screenshot upload - store locally
+    // Upload video/screenshot to Azure Blob (the `assets` container). The
+    // resulting /objects/<id>.<ext> path is served by the existing
+    // /api/storage/objects/* route — no new route needed, and the bytes
+    // survive container restarts.
     let videoObjectPath: string | null = null;
 
     if (body.media?.dataUrl) {
       console.log("[jams] Processing media.dataUrl, length:", body.media.dataUrl.length);
       try {
-        // Match data URLs with optional parameters like codecs=vp8
         // Format: data:video/webm;codecs=vp8;base64,DATA or data:image/png;base64,DATA
         const matches = body.media.dataUrl.match(/^data:([^;]+)(;[^;]+)*;base64,(.+)$/);
         console.log("[jams] Regex match result:", matches ? `matched, contentType=${matches[1]}` : "NO MATCH");
         if (matches) {
           const contentType = matches[1];
-          const base64Data = matches[3]; // Group 3 because group 2 captures optional params like ;codecs=vp8
+          const base64Data = matches[3];
           const binaryData = Buffer.from(base64Data, "base64");
 
-          // Determine file extension from content type
           let ext = "bin";
           if (contentType.includes("png")) ext = "png";
           else if (contentType.includes("jpeg") || contentType.includes("jpg")) ext = "jpg";
           else if (contentType.includes("webm")) ext = "webm";
           else if (contentType.includes("mp4")) ext = "mp4";
 
-          // Save to local file
-          const mediaId = randomUUID();
-          const fileName = `${mediaId}.${ext}`;
-          const filePath = path.join(LOCAL_MEDIA_DIR, fileName);
-          fs.writeFileSync(filePath, binaryData);
-
-          // Use /objects/local/ prefix so dashboard can fetch via /api/storage/local/xxx
-          videoObjectPath = `/objects/local/${fileName}`;
-          console.log("[jams] Media saved successfully:", { videoObjectPath, size: binaryData.length });
+          videoObjectPath = await objectStorageService.uploadBytes(binaryData, contentType, ext);
+          console.log("[jams] Media uploaded to Blob:", { videoObjectPath, size: binaryData.length });
         }
       } catch (uploadErr) {
-        console.error("[jams] Media save failed:", uploadErr);
+        console.error("[jams] Blob upload failed:", uploadErr);
         videoObjectPath = null;
       }
     } else {
@@ -189,7 +170,9 @@ router.post("/jams", requireAuth, async (req: any, res) => {
       })
       .returning();
 
-    // Build response URL for the dashboard
+    // Build response URL for the dashboard. NOTE: hardcoded localhost here is
+    // a pre-existing merge artifact; unused by the extension (it only consumes
+    // recording.id).
     const dashboardUrl = `http://localhost:3001/recordings/${recording.id}`;
 
     res.status(201).json({
@@ -201,29 +184,6 @@ router.post("/jams", requireAuth, async (req: any, res) => {
     console.error("Failed to create jam/recording:", err);
     res.status(500).json({ error: { code: "internal_error", message: "Failed to create recording" } });
   }
-});
-
-/**
- * GET /local-media/:filename
- * Serves locally stored media files
- */
-router.get("/local-media/:filename", (req, res) => {
-  const { filename } = req.params;
-  const filePath = path.join(LOCAL_MEDIA_DIR, filename);
-
-  if (!fs.existsSync(filePath)) {
-    return res.status(404).json({ error: "Media not found" });
-  }
-
-  // Determine content type
-  let contentType = "application/octet-stream";
-  if (filename.endsWith(".png")) contentType = "image/png";
-  else if (filename.endsWith(".jpg") || filename.endsWith(".jpeg")) contentType = "image/jpeg";
-  else if (filename.endsWith(".webm")) contentType = "video/webm";
-  else if (filename.endsWith(".mp4")) contentType = "video/mp4";
-
-  res.setHeader("Content-Type", contentType);
-  fs.createReadStream(filePath).pipe(res);
 });
 
 export default router;

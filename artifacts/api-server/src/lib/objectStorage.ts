@@ -100,6 +100,24 @@ export class ObjectStorageService {
     return new Response(webStream, { headers });
   }
 
+  // Server-side upload of raw bytes (used by /jams when the extension
+  // sends a data-URL-encoded video). Returns the `/objects/<id>.<ext>`
+  // path that downstream `getObjectEntityFile` + `/storage/objects/*`
+  // already know how to serve.
+  async uploadBytes(
+    data: Buffer,
+    contentType: string,
+    ext: string = "bin"
+  ): Promise<string> {
+    const id = randomUUID();
+    const blobName = `${PRIVATE_PREFIX}/${id}.${ext}`;
+    const blob = this.container.getBlockBlobClient(blobName);
+    await blob.uploadData(data, {
+      blobHTTPHeaders: { blobContentType: contentType },
+    });
+    return `/objects/${id}.${ext}`;
+  }
+
   async getObjectEntityUploadURL(): Promise<string> {
     const id = randomUUID();
     const blobName = `${PRIVATE_PREFIX}/${id}`;

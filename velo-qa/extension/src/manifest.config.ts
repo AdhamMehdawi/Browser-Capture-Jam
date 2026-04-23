@@ -19,13 +19,13 @@ const hostPermissions = [
 
 export default defineManifest({
   manifest_version: 3,
-  name: 'Velo QA',
-  short_name: 'Velo QA',
-  description: 'One-click bug capture — screenshot + console + network + device. Open-source jam.dev.',
+  name: 'VeloCap',
+  short_name: 'VeloCap',
+  description: 'One-click bug capture — record screen, console, network, and user actions, then share a repro link.',
   version: '0.1.0',
   action: {
     default_popup: 'src/popup/index.html',
-    default_title: 'Velo QA — capture a bug',
+    default_title: 'VeloCap — capture a bug',
   },
   background: {
     service_worker: 'src/background/index.ts',

@@ -36,7 +36,8 @@ export default function Dashboard() {
 
     try {
       // Direct fetch as a workaround
-      const response = await fetch(`/api/recordings/${id}`, {
+      const apiBase = import.meta.env.VITE_API_URL ?? "";
+      const response = await fetch(`${apiBase}/api/recordings/${id}`, {
         method: 'DELETE',
         credentials: 'include',
       });

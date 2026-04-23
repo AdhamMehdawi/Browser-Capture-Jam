@@ -424,8 +424,9 @@ export default function RecordingViewer() {
   }
 
   // Handle both old (/local-media/) and new (/objects/local/) path formats
+  const apiBase = import.meta.env.VITE_API_URL ?? "";
   const videoUrl = recording.videoObjectPath
-    ? `/api/storage/${recording.videoObjectPath.replace(/^\/objects\//, '').replace(/^\/local-media\//, 'local/')}`
+    ? `${apiBase}/api/storage/${recording.videoObjectPath.replace(/^\/objects\//, '').replace(/^\/local-media\//, 'local/')}`
     : null;
 
   return (

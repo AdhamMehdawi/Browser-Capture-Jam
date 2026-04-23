@@ -1,0 +1,121 @@
+name: Deploy to prod
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'api-server image tag to deploy (default: build from current commit)'
+        required: false
+        default: ''
+      deploy_api:
+        description: 'Deploy api-server'
+        type: boolean
+        default: true
+      deploy_dashboard:
+        description: 'Deploy dashboard'
+        type: boolean
+        default: true
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AZ_RG: VeloCap
+  ACR_NAME: velocapcr
+  API_APP_NAME: velocap-api-prod
+  SWA_NAME: velocap-swa-prod
+  API_URL: https://velocap-api-prod.wonderfulmoss-c389e3c8.uaenorth.azurecontainerapps.io
+  CLERK_PK: pk_test_ZmlybS10YXBpci05NS5jbGVyay5hY2NvdW50cy5kZXYk
+
+jobs:
+  build-push-api:
+    if: inputs.deploy_api && inputs.image_tag == ''
+    runs-on: ubuntu-latest
+    environment: prod
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - id: meta
+        run: echo "tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - run: |
+          az acr build \
+            --registry "${{ env.ACR_NAME }}" \
+            --image "api-server:${{ steps.meta.outputs.tag }}" \
+            --file artifacts/api-server/Dockerfile \
+            .
+
+  apply-prod:
+    needs: build-push-api
+    if: always() && inputs.deploy_api
+    runs-on: ubuntu-latest
+    environment: prod
+    defaults:
+      run:
+        working-directory: infra/envs/prod
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.14.9
+      - run: terraform init -no-color
+      - name: terraform apply
+        run: |
+          # Prefer the user-supplied image_tag; else the one we just built.
+          IMAGE_TAG="${{ inputs.image_tag }}"
+          [ -z "$IMAGE_TAG" ] && IMAGE_TAG="${{ needs.build-push-api.outputs.image_tag }}"
+          terraform apply -auto-approve -no-color \
+            -var "api_image=${{ env.ACR_NAME }}.azurecr.io/api-server:${IMAGE_TAG}"
+
+  build-deploy-dashboard:
+    if: inputs.deploy_dashboard
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build dashboard
+        env:
+          VITE_API_URL: ${{ env.API_URL }}
+          VITE_CLERK_PUBLISHABLE_KEY: ${{ env.CLERK_PK }}
+          PORT: '3000'
+          BASE_PATH: '/'
+        run: pnpm --filter @workspace/snapcap-dashboard run build
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy to SWA
+        run: |
+          SWA_TOKEN=$(az staticwebapp secrets list \
+            --name "${{ env.SWA_NAME }}" \
+            --resource-group "${{ env.AZ_RG }}" \
+            --query properties.apiKey -o tsv)
+          npx --yes @azure/static-web-apps-cli deploy \
+            ./artifacts/snapcap-dashboard/dist/public \
+            --deployment-token "$SWA_TOKEN" \
+            --env production \
+            --no-use-keychain

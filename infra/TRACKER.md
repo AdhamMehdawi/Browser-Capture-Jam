@@ -7,14 +7,14 @@ Living status of the Azure deployment. Update after any meaningful change
 
 ---
 
-## ✅ Phase 5 unpaused and completed (2026-04-23)
+## ✅ Phase 5 completed (2026-04-23)
 
-Parallel Clerk branch merged via `git merge origin/main` on 2026-04-23 (merge commit `671703c`). Real keys written to KV, Terraform switched from placeholder-inline secrets to **KV data sources** (so future `az keyvault secret set` updates propagate on next apply without TF fighting back). `MOCK_AUTH` removed. Dashboard rebuilt with real `VITE_CLERK_PUBLISHABLE_KEY` + redeployed.
+End-to-end flow working on dev. Parallel Clerk branch merged (`671703c`), real keys in KV via `az keyvault secret set`, Terraform using KV data sources so out-of-band secret updates propagate, `MOCK_AUTH` removed, dashboard rebuilt with real publishable key + API-URL base + Clerk-JWT Authorization bridge, deployed to SWA. Browser smoke test passed.
 
-Post-Clerk verification:
-- `GET /api/healthz` → 200 (public, unchanged)
-- `GET /api/recordings` → **401 Unauthorized** (Clerk now properly gating — was 200 under MOCK_AUTH)
-- Dashboard bundle now contains the real Clerk pk; browser Clerk init should succeed
+Verification chain:
+- `GET /api/healthz` → 200 (public)
+- `GET /api/recordings` (unauth'd) → 401 (Clerk gating)
+- Dashboard `/dashboard` page after Clerk sign-in → loads stats + recordings via `Authorization: Bearer <JWT>` → 304/200 from ACA backend
 
 **What the merging developer (or reviewer) needs to know:**
 - Branch `deployment` at commit `7189cdf` contains all the Azure deployment work.
@@ -138,7 +138,9 @@ Known follow-ups (do NOT block Phase 5):
 - ✅ Clerk keys set in KV via `az keyvault secret set` (2026-04-23)
 - ✅ `MOCK_AUTH` removed from Terraform; ACA revision rolled to `671703c` image with live Clerk secrets read via KV data sources
 - ✅ Dashboard rebuilt with real `VITE_CLERK_PUBLISHABLE_KEY` + redeployed to `velocap-swa-dev`
-- ⬜ **Browser smoke test** — open https://salmon-sea-0c8c28b03.7.azurestaticapps.net, sign in with Clerk, verify `/api/me` + recordings list. (Requires a human; can't do from CLI.)
+- ✅ **Browser smoke test passed** (2026-04-23). Sign-in via Clerk, `/api/recordings/stats` + `/api/recordings?limit=50` return 304 (auth-validated cached responses). CORS preflights return 204. End-to-end auth: browser Clerk session → `Authorization: Bearer <JWT>` → ACA → clerkMiddleware → requireAuth → Postgres. **Required two extra fixes beyond just setting Clerk keys:**
+  - Dashboard was calling `/api/*` same-origin (no `setBaseUrl`); fixed in `main.tsx` (commit `9c9b3e4`)
+  - Clerk session cookies don't cross origins; added `ClerkApiTokenBridge` in `App.tsx` to pass Clerk JWT via `Authorization` header (commit `df517a7`)
 - ⬜ Remove laptop Postgres firewall rule `tareq-laptop-temp` (left in place for active dev; re-add with `az postgres flexible-server firewall-rule create -g VeloCap -n velocap-pg-dev --rule-name tareq-laptop-temp --start-ip-address $(curl -s https://api.ipify.org) --end-ip-address $(curl -s https://api.ipify.org)`)
 
 ### Phase 6 — Prod env ⬜
@@ -193,7 +195,8 @@ Resource group **`velocap-tfstate-rg`** (uaenorth):
 
 ## Changelog
 
-- **2026-04-23** — Phase 5 completed. Merged `origin/main` into `deployment` (merge commit `671703c`) to pick up Clerk integration. Added KV data sources so the live secret values flow into the ACA secret store on each apply. MOCK_AUTH removed; `/api/recordings` now correctly returns 401 without a Clerk session. Dashboard rebuilt with real publishable key and redeployed to SWA. Flagged: `.env` files with real `sk_test_*` key are in git history (pk_test_* matches test Clerk instance `firm-tapir-95`; rotation is a separate follow-up).
+- **2026-04-23** — **Phase 5 fully done.** Browser smoke test passed after two fixes: (1) `main.tsx` now calls `setBaseUrl(VITE_API_URL)` — without it, dashboard was calling relative `/api/*` which hit the SWA origin and 404'd (`9c9b3e4`). (2) Added `ClerkApiTokenBridge` in `App.tsx` to wire Clerk's `useAuth().getToken()` into the custom-fetch auth-token getter, so every API call carries `Authorization: Bearer <JWT>` (`df517a7`). Clerk session cookies don't cross the SWA↔ACA origin boundary; JWT-in-header pattern is the standard cross-origin workaround.
+- **2026-04-23** — Phase 5 unpaused. Merged `origin/main` into `deployment` (merge commit `671703c`) to pick up Clerk integration. Added KV data sources so the live secret values flow into the ACA secret store on each apply. MOCK_AUTH removed; `/api/recordings` now correctly returns 401 without a Clerk session. Dashboard rebuilt with real publishable key and redeployed to SWA. Flagged: `.env` files with real `sk_test_*` key are in git history (pk_test_* matches test Clerk instance `firm-tapir-95`; rotation is a separate follow-up).
 - **2026-04-22** — Dashboard built + deployed to `velocap-swa-dev` via SWA CLI. Serving HTML at https://salmon-sea-0c8c28b03.7.azurestaticapps.net. Clerk key still a placeholder — in-browser auth won't work until rebuilt with the real publishable key.
 - **2026-04-22** — Phase 5 started. Drizzle schema pushed to `velocap-pg-dev`; `GET /api/recordings` returns real data end-to-end. Postgres admin password regenerated without special chars after `random_password` default tripped URL parsing in the pg driver. Laptop firewall rule `tareq-laptop-temp` added for dev-time DB access.
 - **2026-04-22** — Phase 4 done. api-server image `09d89c8-fix2` pushed to `velocapcr`, running in `velocap-api-dev`, `/api/healthz` returning 200. Option A (SnapCap stack) locked after realizing velo-qa/server + snapcap-dashboard + velo-qa/extension mix wasn't coherent. Decision was triggered by the user sharing the "Summary Table" image.

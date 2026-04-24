@@ -1,4 +1,7 @@
 import "dotenv/config";
+// Instrumentation must load before `app` so App Insights can monkey-patch
+// http / https / pg before any route handler or DB client is imported.
+import "./lib/instrumentation";
 import app from "./app";
 import { logger } from "./lib/logger";
 

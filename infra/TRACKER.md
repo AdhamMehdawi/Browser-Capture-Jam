@@ -158,6 +158,7 @@ Known follow-ups (do NOT block Phase 5):
 - 🟨 **7.1 GitHub Actions CI/CD** — workflows + runbook committed (`ca011aa`), NOT active. Blocked on: (a) Adham adding Tareq as GH collaborator, (b) Malak/Aref creating the Entra app reg + role assignments. See `infra/CICD-SETUP.md`.
 - ✅ **7.2 Alerts + budget** — prod action group (emails Tareq + info), alert on ACA replicas=0 and Postgres CPU>80%/15m, $100/mo RG budget with 50/80/100% thresholds. Applied via TF, verified via `az monitor metrics alert list` + `az consumption budget list`.
 - ✅ **7.3 Extension build** — release-mode dev build zipped (`velocap-extension-dev.zip`), privacy policy hosted at `/privacy.html`, CWS submission reference at `velo-qa/extension/CWS-SUBMISSION.md`.
+- ✅ **7.4 App Insights SDK wired** — `applicationinsights@2.9.6` loaded via createRequire() from `artifacts/api-server/src/lib/instrumentation.ts`. Auto-collects requests / performance / exceptions / dependencies / console. Dev + prod running image `0ca187b-ai2`. Telemetry flows to `velocap-appi-{dev,prod}`.
 - ⬜ 7.3b — Re-build extension for prod + re-publish once dev listing is approved and workflow is validated.
 
 ---
@@ -198,6 +199,7 @@ Resource group **`velocap-tfstate-rg`** (uaenorth):
 
 ## Changelog
 
+- **2026-04-24** — Application Insights SDK wired into api-server. `createRequire()` pattern avoids an ESM interop bug where `import * as appInsights` returned a namespace missing `defaultClient`. Both envs now emit telemetry (`velocap-appi-dev`, `velocap-appi-prod`).
 - **2026-04-23** — Phase 7.2 done. Prod alerts + $100/mo RG budget applied. Action group emails tareq@ + info@. Alerts for ACA replica=0 and Postgres CPU>80% sustained 15m. Budget thresholds at 50/80/100% actual.
 - **2026-04-23** — Phase 7.1 assets drafted — 3 GH Actions workflows + `infra/CICD-SETUP.md` runbook committed on `deployment` branch. NOT active. Two human blockers remain (Adham → add Tareq as collaborator; Malak/Aref → create Entra app reg + assign roles).
 - **2026-04-23** — Durability fix (`b584267`) deployed to dev + prod. Recordings now persist to Azure Blob; survive container restarts.

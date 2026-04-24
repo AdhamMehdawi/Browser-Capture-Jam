@@ -27,5 +27,5 @@ variable "env" {
 # prod deploys; promote the same digest from dev after smoke-testing.
 variable "api_image" {
   type    = string
-  default = "velocapcr.azurecr.io/api-server:10a2fb3-ai"
+  default = "velocapcr.azurecr.io/api-server:0ca187b-ai2"
 }

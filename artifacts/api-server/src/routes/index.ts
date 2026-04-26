@@ -8,11 +8,14 @@ import jamsRouter from "./jams";
 
 const router: IRouter = Router();
 
+// Public routes first (no auth middleware)
 router.use(healthRouter);
 router.use(storageRouter);
+router.use(shareRouter);
+
+// Authenticated routes
 router.use(recordingsRouter);
 router.use(userRouter);
-router.use(shareRouter);
 router.use(jamsRouter);
 
 export default router;

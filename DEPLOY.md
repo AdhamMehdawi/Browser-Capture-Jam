@@ -32,6 +32,16 @@ the first time; bookmark the sections you'll repeat.
 - Owners (Azure + Entra admin): `malakalsaffar@thejumpapp.org`, `aref@menatal.com`
 - Repo owner: `AdhamMehdawi` on GitHub
 
+**Branch model**
+
+| Branch | What it represents | Deploy target |
+|---|---|---|
+| `main` | Stable mainline (currently behind by 18 commits — being caught up) | nothing yet |
+| `development` | What's running in dev | `velocap-*-dev` resources |
+| `production` | What's running in prod | `velocap-*-prod` resources |
+
+**Workflow:** make changes → commit to `development` → smoke test dev → fast-forward `production` from `development` → smoke test prod. CI/CD will auto-deploy on push to each branch once Malak's Entra app reg is in place; until then, push triggers nothing automatically and you run the deploy commands below manually.
+
 ---
 
 ## Prerequisites (one-time machine setup)
@@ -123,26 +133,33 @@ If anything fails → see [Troubleshooting](#troubleshooting).
 
 ## Operation 2 — Promote dev to prod
 
-After dev passes smoke test, promote the **same image digest** to prod.
+After dev passes smoke test, promote the **same image digest** + **same code** to prod by fast-forwarding the `production` branch.
 
 ```bash
-GIT_SHA=$(git rev-parse --short HEAD)   # the same SHA you deployed to dev
+# 1. Bring `production` up to whatever is now on `development`
+git checkout production
+git merge --ff-only development
+git push origin production
 
+# 2. Apply prod (same image SHA as dev — no rebuild needed)
+GIT_SHA=$(git rev-parse --short HEAD)
 cd infra/envs/prod
 terraform apply -auto-approve \
   -var "api_image=velocapcr.azurecr.io/api-server:${GIT_SHA}"
 
+# 3. Smoke test
 sleep 30
 curl -sS -w "\nHTTP %{http_code}\n" \
   https://velocap-api-prod.wonderfulmoss-c389e3c8.uaenorth.azurecontainerapps.io/api/healthz
+
+# 4. Switch back to development for further work
+cd ../../..
+git checkout development
 ```
 
-Then commit the variable bump on the branch:
-```bash
-git add infra/envs/dev/variables.tf infra/envs/prod/variables.tf
-git commit -m "infra: bump api_image to ${GIT_SHA}"
-git push
-```
+**Why fast-forward only**: keeps `production` history strictly = `development` at the time of the promote. No divergence, no merge commits.
+
+If `git merge --ff-only development` refuses, it means someone made a hotfix directly on `production`. Resolve by either rebasing the hotfix onto `development` or merging `production` into `development` first.
 
 ---
 

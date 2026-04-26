@@ -2,7 +2,7 @@ name: Deploy to dev
 
 on:
   push:
-    branches: [deployment, main]
+    branches: [development]
     paths:
       - 'artifacts/api-server/**'
       - 'artifacts/snapcap-dashboard/**'

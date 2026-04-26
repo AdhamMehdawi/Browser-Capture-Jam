@@ -30,7 +30,9 @@ env:
 
 jobs:
   build-push-api:
-    if: inputs.deploy_api && inputs.image_tag == ''
+    # On push to `production` always build. On manual dispatch, only build if
+    # the user wants it AND didn't pin a specific tag.
+    if: github.event_name == 'push' || (inputs.deploy_api && inputs.image_tag == '')
     runs-on: ubuntu-latest
     environment: prod
     outputs:
@@ -53,7 +55,7 @@ jobs:
 
   apply-prod:
     needs: build-push-api
-    if: always() && inputs.deploy_api
+    if: always() && (github.event_name == 'push' || inputs.deploy_api)
     runs-on: ubuntu-latest
     environment: prod
     defaults:
@@ -79,7 +81,7 @@ jobs:
             -var "api_image=${{ env.ACR_NAME }}.azurecr.io/api-server:${IMAGE_TAG}"
 
   build-deploy-dashboard:
-    if: inputs.deploy_dashboard
+    if: github.event_name == 'push' || inputs.deploy_dashboard
     runs-on: ubuntu-latest
     environment: prod
     steps:

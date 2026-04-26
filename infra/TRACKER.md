@@ -158,7 +158,7 @@ All 19 resources applied successfully (2026-04-21).
 
 ## GitHub state
 
-- Branch `deployment` pushed to origin at https://github.com/AdhamMehdawi/Browser-Capture-Jam/tree/deployment
+- Branch `development` (formerly `deployment`) pushed to origin at https://github.com/AdhamMehdawi/Browser-Capture-Jam/tree/development; new `production` branch created at the same head
 - Tareq is **collaborator** with Write role
 - Repo secrets configured: `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`
 - GitHub environment `prod` created with Required Reviewers

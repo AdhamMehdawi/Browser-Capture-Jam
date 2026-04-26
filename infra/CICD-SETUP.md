@@ -1,6 +1,6 @@
 # VeloCap — CI/CD setup runbook
 
-One-time steps to wire GitHub Actions into Azure using **OIDC federated credentials** (no secrets stored in GitHub). After this is done, merges to `deployment`/`main` deploy to dev automatically, and tagged releases trigger prod deploys via manual dispatch.
+One-time steps to wire GitHub Actions into Azure using **OIDC federated credentials** (no secrets stored in GitHub). After this is done, pushes to `development` deploy to dev automatically, and pushes to `production` deploy to prod (gated by required-reviewer approval).
 
 ---
 
@@ -40,23 +40,23 @@ echo "SUBSCRIPTION_ID=$SUB"
 # --- federated credentials: one per GitHub subject claim ---
 # (Wildcards not supported; each trigger needs its own credential.)
 
-# Pushes to `deployment` branch
+# Pushes to `development` branch (auto-deploy to dev)
 az ad app federated-credential create --id "$APP_ID" --parameters "$(cat <<EOF
 {
-  "name": "gh-deployment-branch",
+  "name": "gh-development-branch",
   "issuer": "https://token.actions.githubusercontent.com",
-  "subject": "repo:${REPO}:ref:refs/heads/deployment",
+  "subject": "repo:${REPO}:ref:refs/heads/development",
   "audiences": ["api://AzureADTokenExchange"]
 }
 EOF
 )"
 
-# Pushes to `main` branch
+# Pushes to `production` branch (auto-deploy to prod, with required-reviewer gate)
 az ad app federated-credential create --id "$APP_ID" --parameters "$(cat <<EOF
 {
-  "name": "gh-main-branch",
+  "name": "gh-production-branch",
   "issuer": "https://token.actions.githubusercontent.com",
-  "subject": "repo:${REPO}:ref:refs/heads/main",
+  "subject": "repo:${REPO}:ref:refs/heads/production",
   "audiences": ["api://AzureADTokenExchange"]
 }
 EOF
@@ -121,9 +121,10 @@ GitHub → Settings → Environments → **New environment** → name it **`prod
 - Optionally add a wait timer.
 
 ### 4c. Push the workflows
-The `.github/workflows/` folder exists on the `deployment` branch. Once Tareq has push access:
+The `.github/workflows/` folder exists on the `development` branch. Once Tareq has push access:
 ```bash
-git push -u origin deployment
+git push -u origin development
+git push -u origin production
 ```
 The first workflow run triggers on the push.
 
@@ -134,16 +135,16 @@ The first workflow run triggers on the push.
 | File | Trigger | What it does |
 |---|---|---|
 | `terraform-plan.yml` | PR against `main` touching `infra/**` | `terraform plan` on dev + prod, posts diff as a PR comment |
-| `deploy-dev.yml` | Push to `deployment` or `main` touching `artifacts/api-server/**`, `lib/**`, `artifacts/snapcap-dashboard/**`, or `infra/envs/dev/**` | Builds changed piece(s), pushes new api image to ACR, applies TF dev, rebuilds/redeploys dashboard to dev SWA |
-| `deploy-prod.yml` | `workflow_dispatch` (manual GitHub UI button) with optional image-tag input | Same as dev but for prod, gated by the `prod` environment's required-reviewers approval |
+| `deploy-dev.yml` | Push to `development` touching `artifacts/api-server/**`, `lib/**`, `artifacts/snapcap-dashboard/**`, or `infra/envs/dev/**` | Builds changed piece(s), pushes new api image to ACR, applies TF dev, rebuilds/redeploys dashboard to dev SWA |
+| `deploy-prod.yml` | Push to `production` (or `workflow_dispatch` with optional image-tag) | Same as dev but for prod, gated by the `prod` GitHub environment's required-reviewers approval |
 
 ---
 
 ## Verifying after step 4
 
-1. Tareq pushes `deployment` to origin
+1. Push a small commit to `development`
 2. `deploy-dev.yml` runs; should complete green
 3. Open a PR changing anything under `infra/`; `terraform-plan.yml` comments the plan
-4. Trigger `deploy-prod.yml` from the Actions tab → approves → deploys to prod
+4. Merge `development` → `production` (PR or fast-forward); `deploy-prod.yml` triggers, paused for reviewer approval; approve → deploys to prod
 
 If a step fails, the logs in the GitHub Actions run show exactly which `az`/`terraform` call broke.

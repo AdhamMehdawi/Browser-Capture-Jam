@@ -83,8 +83,9 @@ export default function SharedRecordingViewer() {
   }
 
   // videoObjectPath is `/objects/<id>.<ext>` (Azure Blob). Build fetch URL.
+  const apiBase = import.meta.env.VITE_API_URL ?? "";
   const videoUrl = recording.videoObjectPath
-    ? `/api/storage${recording.videoObjectPath}`
+    ? `${apiBase}/api/storage${recording.videoObjectPath}`
     : null;
 
   return (

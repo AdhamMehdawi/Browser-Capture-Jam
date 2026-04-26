@@ -8,16 +8,10 @@ import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 // without a real publishable key. Local dev only.
 const useClerkMock = process.env.USE_CLERK_MOCK === "1";
 
-const rawPort = process.env.PORT;
-
-if (!rawPort) {
-  throw new Error(
-    "PORT environment variable is required but was not provided.",
-  );
-}
-
+// Local dev: PORT defaults to 3001 so a fresh `pnpm dev` works without
+// extra env. CI / cloud overrides via the env var.
+const rawPort = process.env.PORT ?? "3001";
 const port = Number(rawPort);
-
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }

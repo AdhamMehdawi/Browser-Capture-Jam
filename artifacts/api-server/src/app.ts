@@ -39,11 +39,23 @@ app.use(cors({ credentials: true, origin: true }));
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
+// Public routes that don't require authentication
+const PUBLIC_ROUTES = [
+  "/api/healthz",
+  "/api/share/",
+  "/api/storage/",
+];
+
 // Skip Clerk middleware when in mock auth mode
 if (!MOCK_AUTH) {
-  // Use Clerk middleware but don't let it crash on invalid tokens
-  // The requireAuth middleware will handle authorization
+  // Use Clerk middleware but skip for public routes
   app.use((req, res, next) => {
+    // Skip Clerk for public routes
+    const isPublicRoute = PUBLIC_ROUTES.some(route => req.path.startsWith(route));
+    if (isPublicRoute) {
+      return next();
+    }
+
     clerkMiddleware()(req, res, (err) => {
       // Ignore Clerk errors and continue - our requireAuth will handle auth
       if (err) {

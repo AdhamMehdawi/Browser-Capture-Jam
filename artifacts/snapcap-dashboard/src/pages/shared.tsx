@@ -82,9 +82,9 @@ export default function SharedRecordingViewer() {
     );
   }
 
-  // Handle both old (/local-media/) and new (/objects/local/) path formats
+  // videoObjectPath is `/objects/<id>.<ext>` (Azure Blob). Build fetch URL.
   const videoUrl = recording.videoObjectPath
-    ? `/api/storage/${recording.videoObjectPath.replace(/^\/objects\//, '').replace(/^\/local-media\//, 'local/')}`
+    ? `/api/storage${recording.videoObjectPath}`
     : null;
 
   return (

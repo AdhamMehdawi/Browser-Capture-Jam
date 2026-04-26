@@ -51,3 +51,12 @@ Thumbs.db
 # Local media storage (uploaded videos/screenshots)
 .data/
 **/\.data/
+
+# Handover docs contain live credentials — never commit
+HANDOVER.md
+VeloCap-Handover.docx
+*-handover-data.env
+
+# Local extension build artifacts
+velocap-extension-*.zip
+**/dist.zip

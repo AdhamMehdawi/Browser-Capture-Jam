@@ -173,6 +173,12 @@ All 19 resources applied successfully (2026-04-21).
 1. **Sponsorship credit balance unverified** — Malak to check at https://www.microsoftazuresponsorships.com/Balance.
 2. **`.env` files contain real `sk_test_*` Clerk key in git history** — needs rotation + `.gitignore`. Coordinate with the teammate who committed them.
 3. **`tareq-laptop-temp` Postgres firewall rules** on both `velocap-pg-dev` and `velocap-pg-prod`. Remove when no longer actively developing.
+4. **Dev Postgres firewall is open to 0.0.0.0–255.255.255.255** (rule `allow-all-temp-handover`, added 2026-04-26 for cross-device handover). Auth still required, but server is exposed to brute-force / port scans. Close when the handover situation ends:
+   ```
+   az postgres flexible-server firewall-rule delete \
+     -g VeloCap -n velocap-pg-dev --rule-name allow-all-temp-handover -y
+   ```
+5. **`production` branch is currently behind `development`** by docs-only commits since the last prod deploy. The fast-forward step in `DEPLOY.md` Op 2 catches it up automatically on the next prod promote. Not blocking.
 
 ### ⏸ Deferred (tracked, not urgent)
 4. **CI/CD activation** — needs Malak to run `infra/CICD-SETUP.md` Step 2 (~2 min). User chose to defer; manual deploys via `DEPLOY.md` are sufficient for current team size + cadence.
@@ -194,6 +200,11 @@ All 19 resources applied successfully (2026-04-21).
 
 ## Changelog (newest first)
 
+- **2026-04-26** — **Backend stack decision reaffirmed.** Considered swapping deployed `artifacts/api-server` for `velo-qa/server` (per the team's earlier "Summary Table" plan), drafted a SOLID-grounded migration plan, then walked it back. Decision: keep `artifacts/api-server` (Express + Clerk + Drizzle) as the canonical backend; the merged Clerk integration (`c1039f2`) effectively moved the project there, and reverting would be 2-3 weeks of work for marginal benefit. `velo-qa/server` stays in the repo as reference but is not deployed. (Migration plan history at commits `a5baf8d` add → `127aec0` delete.)
+- **2026-04-26** — Cross-device handover material generated. `HANDOVER.md` + `VeloCap-Handover.docx` (both gitignored, contain live credentials) authored to share full deployment context with another machine. Dev Postgres firewall opened to 0.0.0.0 (rule `allow-all-temp-handover`) so the other machine can connect; close it when handover ends.
+- **2026-04-26** — **Branch model formalized.** Renamed `deployment` branch to `development`; created new `production` branch from the same head. Workflows updated: `deploy-dev.yml` triggers on push to `development`, `deploy-prod.yml` triggers on push to `production` (gated by required-reviewer rule on the `prod` GitHub environment). CI/CD still dormant pending Malak's Entra app reg.
+- **2026-04-26** — Local-dev experience polished. `LOCAL-DEV.md` written, root `pnpm dev` script runs api + dashboard concurrently with colored logs, api-server `dev` script switched to `tsx watch` for instant hot-reload, dashboard's `vite.config.ts` no longer requires `PORT` env var (defaults to 3001).
+- **2026-04-26** — `DEPLOYMENT-RECAP.md` added at repo root — narrative walkthrough of every deployment phase for future devs / Claude sessions to read top-to-bottom.
 - **2026-04-26** — Wrote `DEPLOY.md` runbook (511 lines) at repo root; covers all manual deploy + maintenance ops. CI/CD activation officially deferred — manual deploys are the path forward for now. `deployment` branch pushed to origin (after Adham added Tareq as collaborator). GitHub repo secrets `AZURE_TENANT_ID` + `AZURE_SUBSCRIPTION_ID` configured; `prod` GitHub environment created. `AZURE_CLIENT_ID` still pending Malak's Entra app reg.
 - **2026-04-24** — Application Insights SDK wired into api-server. `createRequire()` pattern avoids an ESM interop bug where `import * as appInsights` returned a namespace missing `defaultClient`. Both envs now emit telemetry (`velocap-appi-dev`, `velocap-appi-prod`). Image `0ca187b-ai2` deployed to dev + prod.
 - **2026-04-23** — Phase 7.2 done. Prod alerts + $100/mo RG budget applied. Action group emails tareq@ + info@. Alerts for ACA replica=0 and Postgres CPU>80% sustained 15m. Budget thresholds at 50/80/100% actual.

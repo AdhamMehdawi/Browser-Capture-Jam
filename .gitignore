@@ -52,6 +52,12 @@ Thumbs.db
 .data/
 **/\.data/
 
+# Environment files with secrets — never commit
+.env
+.env.local
+.env.*.local
+!.env.example
+
 # Handover docs contain live credentials — never commit
 HANDOVER.md
 VeloCap-Handover.docx

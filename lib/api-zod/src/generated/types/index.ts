@@ -9,6 +9,7 @@
 export * from "./apiKeyResponse";
 export * from "./createRecordingBody";
 export * from "./createRecordingBodyBrowserInfo";
+export * from "./createRecordingBodyThumbnail";
 export * from "./healthStatus";
 export * from "./listRecordingsParams";
 export * from "./networkLogEntry";

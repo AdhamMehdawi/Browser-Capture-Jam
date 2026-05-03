@@ -42,6 +42,7 @@ export const ListRecordingsResponse = zod.object({
       consoleCount: zod.number(),
       clickCount: zod.number(),
       videoObjectPath: zod.string().nullish(),
+      thumbnailObjectPath: zod.string().nullish(),
       shareToken: zod.string().nullish(),
       tags: zod.array(zod.string()),
       browserInfo: zod.record(zod.string(), zod.unknown()).nullish(),
@@ -86,6 +87,12 @@ export const CreateRecordingBody = zod.object({
     }),
   ),
   videoObjectPath: zod.string().nullish(),
+  thumbnailObjectPath: zod.string().nullish(),
+  thumbnail: zod
+    .object({
+      dataUrl: zod.string(),
+    })
+    .optional(),
   browserInfo: zod.record(zod.string(), zod.unknown()).nullish(),
 });
 
@@ -112,6 +119,7 @@ export const GetRecordingStatsResponse = zod.object({
       consoleCount: zod.number(),
       clickCount: zod.number(),
       videoObjectPath: zod.string().nullish(),
+      thumbnailObjectPath: zod.string().nullish(),
       shareToken: zod.string().nullish(),
       tags: zod.array(zod.string()),
       browserInfo: zod.record(zod.string(), zod.unknown()).nullish(),
@@ -152,6 +160,7 @@ export const GetRecordingResponse = zod
     consoleCount: zod.number(),
     clickCount: zod.number(),
     videoObjectPath: zod.string().nullish(),
+    thumbnailObjectPath: zod.string().nullish(),
     shareToken: zod.string().nullish(),
     tags: zod.array(zod.string()),
     browserInfo: zod.record(zod.string(), zod.unknown()).nullish(),
@@ -210,6 +219,7 @@ export const UpdateRecordingResponse = zod.object({
   consoleCount: zod.number(),
   clickCount: zod.number(),
   videoObjectPath: zod.string().nullish(),
+  thumbnailObjectPath: zod.string().nullish(),
   shareToken: zod.string().nullish(),
   tags: zod.array(zod.string()),
   browserInfo: zod.record(zod.string(), zod.unknown()).nullish(),
@@ -262,6 +272,7 @@ export const GetSharedRecordingResponse = zod
     consoleCount: zod.number(),
     clickCount: zod.number(),
     videoObjectPath: zod.string().nullish(),
+    thumbnailObjectPath: zod.string().nullish(),
     shareToken: zod.string().nullish(),
     tags: zod.array(zod.string()),
     browserInfo: zod.record(zod.string(), zod.unknown()).nullish(),

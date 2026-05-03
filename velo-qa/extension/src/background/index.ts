@@ -51,6 +51,8 @@ type BgState =
       note?: string;
       /** Context captured during recording - merged start + end. */
       capturedContext: CapturePayload | null;
+      /** JPEG thumbnail captured at recording stop. */
+      thumbnailDataUrl: string | null;
     };
 
 let state: BgState = { kind: 'idle' };
@@ -72,6 +74,7 @@ async function persistPendingPreview(): Promise<void> {
     bytes: state.bytes,
     note: state.note,
     capturedContext: state.capturedContext,
+    thumbnailDataUrl: state.thumbnailDataUrl,
     savedAt: Date.now(),
   };
   await chrome.storage.local.set({ [PENDING_PREVIEW_STORAGE_KEY]: data });
@@ -101,6 +104,7 @@ async function restorePendingPreview(): Promise<boolean> {
     bytes: data.bytes,
     note: data.note,
     capturedContext: data.capturedContext,
+    thumbnailDataUrl: data.thumbnailDataUrl ?? null,
   };
   console.log('[veloqa/bg] restored pending preview from storage', {
     dataUrlLength: data.dataUrl.length,
@@ -622,6 +626,24 @@ async function onRecordedFromOffscreen(msg: {
       capturedContext = startContext;
     }
 
+    // Capture thumbnail as JPEG (~100-200KB vs 3-4MB PNG on Retina)
+    let thumbnailDataUrl: string | null = null;
+    if (tabId != null) {
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        thumbnailDataUrl = await new Promise<string>((resolve, reject) => {
+          chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 70 }, (dataUrl) => {
+            const err = chrome.runtime.lastError;
+            if (err || !dataUrl) return reject(new Error(err?.message ?? 'Thumbnail failed'));
+            resolve(dataUrl);
+          });
+        });
+        console.log('[veloqa/bg] captured thumbnail', { length: thumbnailDataUrl.length });
+      } catch (e) {
+        console.warn('[veloqa/bg] thumbnail capture failed', e);
+      }
+    }
+
     state = {
       kind: 'pending-preview',
       workspaceId,
@@ -630,6 +652,7 @@ async function onRecordedFromOffscreen(msg: {
       durationMs: msg.durationMs,
       bytes: msg.bytes,
       capturedContext,
+      thumbnailDataUrl,
       ...(msg.note ? { note: msg.note } : {}),
     };
 
@@ -726,6 +749,7 @@ async function uploadPendingPreview(req: { title?: string }): Promise<BgResponse
       durationMs: pending.durationMs,
       visibility: 'PUBLIC',
       media: { kind: 'video', dataUrl: pending.dataUrl },
+      thumbnail: pending.thumbnailDataUrl ? { dataUrl: pending.thumbnailDataUrl } : undefined,
     });
     state = { kind: 'idle' };
     await clearPersistedPreview();

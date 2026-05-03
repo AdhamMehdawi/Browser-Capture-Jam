@@ -144,6 +144,25 @@ router.post("/jams", requireAuth, async (req: any, res) => {
       console.log("[jams] No media.dataUrl in body");
     }
 
+    // Upload thumbnail to Blob Storage (non-fatal — recording works without it)
+    let thumbnailObjectPath: string | null = null;
+
+    if (body.thumbnail?.dataUrl) {
+      try {
+        const matches = body.thumbnail.dataUrl.match(/^data:([^;]+)(;[^;]+)*;base64,(.+)$/);
+        if (matches) {
+          const contentType = matches[1];
+          const base64Data = matches[3];
+          const binaryData = Buffer.from(base64Data, "base64");
+          const ext = contentType.includes("png") ? "png" : "jpg";
+          thumbnailObjectPath = await objectStorageService.uploadBytes(binaryData, contentType, ext);
+          console.log("[jams] Thumbnail uploaded to Blob:", { thumbnailObjectPath, size: binaryData.length });
+        }
+      } catch (uploadErr) {
+        console.error("[jams] Thumbnail upload failed (non-fatal):", uploadErr);
+      }
+    }
+
     // Create recording in database using Drizzle ORM
     const title = body.title || body.page?.title || "Untitled Recording";
     const duration = body.durationMs || 0;
@@ -164,6 +183,7 @@ router.post("/jams", requireAuth, async (req: any, res) => {
         consoleCount,
         clickCount,
         videoObjectPath,
+        thumbnailObjectPath,
         tags: [],
         events,
         browserInfo,

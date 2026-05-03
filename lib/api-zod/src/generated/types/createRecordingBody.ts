@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { CreateRecordingBodyBrowserInfo } from "./createRecordingBodyBrowserInfo";
+import type { CreateRecordingBodyThumbnail } from "./createRecordingBodyThumbnail";
 import type { NetworkLogEntry } from "./networkLogEntry";
 
 export interface CreateRecordingBody {
@@ -16,5 +17,7 @@ export interface CreateRecordingBody {
   tags?: string[];
   events: NetworkLogEntry[];
   videoObjectPath?: string | null;
+  thumbnailObjectPath?: string | null;
+  thumbnail?: CreateRecordingBodyThumbnail;
   browserInfo?: CreateRecordingBodyBrowserInfo;
 }

@@ -21,6 +21,7 @@ export interface Recording {
   consoleCount: number;
   clickCount: number;
   videoObjectPath?: string | null;
+  thumbnailObjectPath?: string | null;
   shareToken?: string | null;
   tags: string[];
   browserInfo?: RecordingBrowserInfo;

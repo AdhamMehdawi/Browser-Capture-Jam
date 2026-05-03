@@ -186,8 +186,10 @@ export default function Dashboard() {
                       <div className="aspect-video bg-muted relative border-b border-border flex items-center justify-center overflow-hidden">
                         {(() => {
                           const path = recording.videoObjectPath;
+                          const thumbPath = recording.thumbnailObjectPath;
+                          const apiBase = import.meta.env.VITE_API_URL ?? "";
+                          const storageUrl = (p: string) => `${apiBase}/api/storage/${p.replace(/^\/objects\//, '').replace(/^\/local-media\//, 'local/')}`;
                           const isImage = path && /\.(png|jpg|jpeg|gif|webp)$/i.test(path);
-                          // Treat as video if: has path AND (has video extension OR duration > 1 second OR no extension at all)
                           const isVideo = path && !isImage && (
                             /\.(webm|mp4|mov|avi|mkv)$/i.test(path) ||
                             recording.duration > 1000 ||
@@ -197,30 +199,48 @@ export default function Dashboard() {
                           if (isVideo) {
                             return (
                               <div className="absolute inset-0 bg-black flex items-center justify-center">
+                                {thumbPath && (
+                                  <img
+                                    src={storageUrl(thumbPath)}
+                                    className="w-full h-full object-cover absolute inset-0 z-10 thumbnail-img"
+                                    alt=""
+                                    loading="lazy"
+                                  />
+                                )}
                                 <video
-                                  src={`/api/storage/${path!.replace(/^\/objects\//, '').replace(/^\/local-media\//, 'local/')}`}
-                                  className="w-full h-full object-cover"
+                                  src={storageUrl(path!)}
+                                  className="w-full h-full object-cover absolute inset-0"
                                   muted
                                   loop
                                   playsInline
-                                  preload="metadata"
-                                  onMouseEnter={(e) => e.currentTarget.play()}
-                                  onMouseLeave={(e) => { e.currentTarget.pause(); e.currentTarget.currentTime = 0; }}
+                                  preload={thumbPath ? "none" : "metadata"}
+                                  onMouseEnter={(e) => {
+                                    const thumb = e.currentTarget.parentElement?.querySelector('.thumbnail-img') as HTMLElement | null;
+                                    if (thumb) thumb.style.display = 'none';
+                                    e.currentTarget.play();
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.pause();
+                                    e.currentTarget.currentTime = 0;
+                                    const thumb = e.currentTarget.parentElement?.querySelector('.thumbnail-img') as HTMLElement | null;
+                                    if (thumb) thumb.style.display = '';
+                                  }}
                                   onError={(e) => {
-                                    // If video fails to load, hide it and show fallback
                                     e.currentTarget.style.display = 'none';
                                     const fallback = e.currentTarget.parentElement?.querySelector('.video-fallback');
                                     if (fallback) (fallback as HTMLElement).style.display = 'flex';
                                   }}
                                 />
-                                <div className="video-fallback hidden absolute inset-0 items-center justify-center text-muted-foreground flex-col">
-                                  <Activity className="h-8 w-8 mb-2 opacity-20" />
-                                  <span className="text-xs font-mono">Preview unavailable</span>
-                                </div>
-                                <div className="absolute inset-0 flex items-center justify-center pointer-events-none group-hover:opacity-0 transition-opacity bg-black/30">
+                                {!thumbPath && (
+                                  <div className="video-fallback hidden absolute inset-0 items-center justify-center text-muted-foreground flex-col">
+                                    <Activity className="h-8 w-8 mb-2 opacity-20" />
+                                    <span className="text-xs font-mono">Preview unavailable</span>
+                                  </div>
+                                )}
+                                <div className="absolute inset-0 flex items-center justify-center pointer-events-none group-hover:opacity-0 transition-opacity bg-black/30 z-20">
                                   <Video className="h-10 w-10 text-white/60" />
                                 </div>
-                                <div className="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded font-mono">
+                                <div className="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded font-mono z-20">
                                   {formatDuration(recording.duration)}
                                 </div>
                               </div>
@@ -229,7 +249,7 @@ export default function Dashboard() {
                             return (
                               <div className="absolute inset-0 bg-black flex items-center justify-center">
                                 <img
-                                  src={`/api/storage/${path!.replace(/^\/objects\//, '').replace(/^\/local-media\//, 'local/')}`}
+                                  src={storageUrl(path!)}
                                   className="w-full h-full object-cover"
                                   alt={recording.title}
                                 />

@@ -21,6 +21,7 @@ export const recordingsTable = pgTable("recordings", {
   consoleCount: integer("console_count").notNull().default(0),
   clickCount: integer("click_count").notNull().default(0),
   videoObjectPath: text("video_object_path"),
+  thumbnailObjectPath: text("thumbnail_object_path"),
   shareToken: text("share_token").unique(),
   tags: text("tags").array().notNull().default([]),
   events: jsonb("events").notNull().default([]),

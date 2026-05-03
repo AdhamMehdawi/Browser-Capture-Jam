@@ -25,6 +25,7 @@ export interface Recording {
   consoleCount: number;
   clickCount: number;
   videoObjectPath?: string | null;
+  thumbnailObjectPath?: string | null;
   shareToken?: string | null;
   tags: string[];
   browserInfo?: RecordingBrowserInfo;
@@ -73,6 +74,10 @@ export interface RecordingListResponse {
   limit: number;
 }
 
+export type CreateRecordingBodyThumbnail = {
+  dataUrl: string;
+};
+
 export type CreateRecordingBodyBrowserInfo = { [key: string]: unknown } | null;
 
 export interface CreateRecordingBody {
@@ -83,6 +88,8 @@ export interface CreateRecordingBody {
   tags?: string[];
   events: NetworkLogEntry[];
   videoObjectPath?: string | null;
+  thumbnailObjectPath?: string | null;
+  thumbnail?: CreateRecordingBodyThumbnail;
   browserInfo?: CreateRecordingBodyBrowserInfo;
 }
 

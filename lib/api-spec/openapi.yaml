@@ -313,6 +313,9 @@ components:
         videoObjectPath:
           type: string
           nullable: true
+        thumbnailObjectPath:
+          type: string
+          nullable: true
         shareToken:
           type: string
           nullable: true
@@ -441,6 +444,16 @@ components:
         videoObjectPath:
           type: string
           nullable: true
+        thumbnailObjectPath:
+          type: string
+          nullable: true
+        thumbnail:
+          type: object
+          properties:
+            dataUrl:
+              type: string
+          required:
+            - dataUrl
         browserInfo:
           type: object
           nullable: true

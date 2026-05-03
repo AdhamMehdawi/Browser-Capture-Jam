@@ -27,6 +27,7 @@ router.get("/share/:token", async (req: any, res) => {
       consoleCount: recording.consoleCount,
       clickCount: recording.clickCount,
       videoObjectPath: recording.videoObjectPath,
+      thumbnailObjectPath: recording.thumbnailObjectPath,
       shareToken: recording.shareToken,
       tags: recording.tags,
       browserInfo: recording.browserInfo,

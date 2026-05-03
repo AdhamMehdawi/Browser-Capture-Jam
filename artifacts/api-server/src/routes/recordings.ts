@@ -345,6 +345,7 @@ function sanitizeRecording(r: typeof recordingsTable.$inferSelect) {
     consoleCount: r.consoleCount,
     clickCount: r.clickCount,
     videoObjectPath: r.videoObjectPath,
+    thumbnailObjectPath: r.thumbnailObjectPath,
     shareToken: r.shareToken,
     tags,
     browserInfo,

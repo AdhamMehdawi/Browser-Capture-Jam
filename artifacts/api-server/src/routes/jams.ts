@@ -170,10 +170,8 @@ router.post("/jams", requireAuth, async (req: any, res) => {
       })
       .returning();
 
-    // Build response URL for the dashboard. NOTE: hardcoded localhost here is
-    // a pre-existing merge artifact; unused by the extension (it only consumes
-    // recording.id).
-    const dashboardUrl = `http://localhost:3001/recordings/${recording.id}`;
+    const dashboardBase = process.env.DASHBOARD_URL || process.env.WEB_ORIGIN || 'http://localhost:3001';
+    const dashboardUrl = `${dashboardBase}/recordings/${recording.id}`;
 
     res.status(201).json({
       id: recording.id,

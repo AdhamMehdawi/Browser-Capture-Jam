@@ -181,6 +181,7 @@ module "api" {
     # instance (pk_live_*) is provisioned for this env.
     { name = "NODE_ENV", value = "development" },
     { name = "PORT", value = "4000" },
+    { name = "DASHBOARD_URL", value = "https://${module.dashboard.default_host_name}" },
   ]
 
   env_secret_refs = [

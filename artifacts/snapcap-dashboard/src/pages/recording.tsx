@@ -364,9 +364,19 @@ export default function RecordingViewer() {
     });
   };
 
-  const copyToClipboard = () => {
-    navigator.clipboard.writeText(shareUrl);
-    toast.success("Copied to clipboard");
+  const copyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      toast.success("Copied to clipboard");
+    } catch {
+      // Fallback for when clipboard API is blocked
+      const input = document.querySelector<HTMLInputElement>('input[readonly]');
+      if (input) {
+        input.select();
+        document.execCommand('copy');
+        toast.success("Copied to clipboard");
+      }
+    }
   };
 
   const filteredEvents = useMemo(() => {

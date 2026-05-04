@@ -317,7 +317,7 @@ function PayloadBlock({ label, body }: { label: string; body: string }) {
 export default function RecordingViewer() {
   const params = useParams();
   const id = params.id as string;
-  const [activeTab, setActiveTab] = useState<string>("all");
+  const [activeTab, setActiveTab] = useState<string>("info");
   const [search, setSearch] = useState("");
   const [selectedLog, setSelectedLog] = useState<NetworkLogEntry | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -387,7 +387,8 @@ export default function RecordingViewer() {
       // Tab filter
       if (activeTab === 'actions') {
         if (!ACTION_TYPES.has(event.type)) return false;
-      } else if (activeTab !== "all" && event.type !== activeTab) return false;
+      } else if (activeTab === 'info') return false;
+      else if (event.type !== activeTab) return false;
       
       // Search filter
       if (search) {
@@ -508,132 +509,253 @@ export default function RecordingViewer() {
 
       {/* Main Content - Video on left, Logs on right */}
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
-        {/* Left Column - Video */}
+        {/* Left Column - Video (takes most of the screen) */}
         {videoUrl && (
-          <div className="md:w-[45%] lg:w-[40%] shrink-0 flex flex-col border-r border-border bg-black">
+          <div className="flex-1 flex flex-col border-r border-border bg-black min-w-0">
             <FixedVideoPlayer videoUrl={videoUrl} knownDurationMs={recording.duration} />
           </div>
         )}
 
-        {/* Right Column - Log List */}
-        <div className={`flex-1 flex flex-col min-w-0 overflow-hidden ${!videoUrl ? 'w-full' : ''}`}>
-          <div className="flex-1 flex flex-col bg-background min-h-0">
-            <div className="p-3 border-b border-border flex items-center justify-between bg-card shrink-0 gap-4">
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsList className="bg-muted">
-                  <TabsTrigger value="all">All</TabsTrigger>
-                  <TabsTrigger value="request" className="gap-1.5"><Globe size={14} /> Network</TabsTrigger>
-                  <TabsTrigger value="console" className="gap-1.5"><Terminal size={14} /> Console</TabsTrigger>
-                  <TabsTrigger value="click" className="gap-1.5"><MousePointerClick size={14} /> UI</TabsTrigger>
-                  <TabsTrigger value="actions" className="gap-1.5"><MousePointerClick size={14} /> Actions</TabsTrigger>
-                </TabsList>
-              </Tabs>
-              <div className="relative w-64 shrink-0">
-                <Search className="absolute left-2.5 top-2 h-4 w-4 text-muted-foreground" />
-                <Input 
-                  placeholder="Filter logs..." 
-                  className="h-8 pl-8 text-sm"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <ScrollArea className="flex-1">
-              <div className="divide-y divide-border">
-                {filteredEvents.map((event, i) => (
-                  <div
-                    key={event.id || i}
-                    onClick={() => setSelectedLog(event)}
-                    className={`px-4 py-2.5 flex items-start gap-3 text-sm cursor-pointer hover:bg-accent/50 transition-colors ${
-                      selectedLog?.id === event.id ? 'bg-accent border-l-2 border-l-primary pl-[14px]' : 'pl-4'
-                    }`}
+        {/* Right Column - Info & Logs Sidebar */}
+        <div className={`md:w-[380px] lg:w-[420px] shrink-0 flex flex-col overflow-hidden ${!videoUrl ? 'flex-1 w-full' : ''}`}>
+          {/* Tabs */}
+          <div className="border-b border-border bg-card shrink-0">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+              <TabsList className="w-full justify-start rounded-none border-0 bg-transparent h-auto p-0">
+                {[
+                  { value: 'info', label: 'Info', icon: <Info size={14} /> },
+                  { value: 'console', label: 'Console', icon: <Terminal size={14} /> },
+                  { value: 'request', label: 'Network', icon: <Globe size={14} /> },
+                  { value: 'actions', label: 'Actions', icon: <MousePointerClick size={14} /> },
+                ].map(tab => (
+                  <TabsTrigger
+                    key={tab.value}
+                    value={tab.value}
+                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 py-2.5 text-xs font-medium gap-1.5"
                   >
-                    <div className="text-muted-foreground shrink-0 pt-0.5 text-[10px] font-mono tabular-nums">
-                      {event.timestamp}
+                    {tab.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+          </div>
+
+          {/* Tab Content */}
+          <div className="flex-1 flex flex-col bg-background min-h-0">
+            {/* Info Tab */}
+            {activeTab === 'info' && (
+              <ScrollArea className="flex-1">
+                <div className="p-4 space-y-4">
+                  {/* URL */}
+                  {recording.pageUrl && (
+                    <div>
+                      <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">URL</p>
+                      <a href={recording.pageUrl} target="_blank" rel="noreferrer" className="text-sm text-blue-400 hover:underline break-all">
+                        {recording.pageUrl}
+                      </a>
                     </div>
-                    <div className="mt-0.5 shrink-0">
-                      {getLogIcon(event.type, event.level, event.status)}
-                    </div>
-                    <div className="flex-1 min-w-0 pt-0.5 overflow-hidden">
-                      {event.type === 'request' && (
-                        <div className="flex items-center gap-2">
-                          <span className={`font-mono font-bold shrink-0 ${
-                            event.method === 'GET' ? 'text-blue-400' :
-                            event.method === 'POST' ? 'text-green-400' : 'text-orange-400'
-                          }`}>{event.method}</span>
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] shrink-0 ${
-                            event.status && event.status >= 400 ? 'bg-destructive/20 text-destructive' : 'bg-muted text-muted-foreground'
-                          }`}>
-                            {event.status || 'PENDING'}
-                          </span>
-                          <span className="truncate text-xs" title={event.url || ''}>{event.url}</span>
-                        </div>
-                      )}
-                      {event.type === 'console' && (
-                        <div className={`truncate text-xs ${
-                          event.level === 'error' ? 'text-destructive' :
-                          event.level === 'warn' ? 'text-orange-400' : 'text-foreground'
-                        }`}>
-                          {event.message}
-                        </div>
-                      )}
-                      {event.type === 'click' && (
-                        <div className="space-y-0.5">
-                          <div className="flex items-center gap-2">
-                            <span className="text-primary font-medium text-xs">click</span>
-                            {event.targetText && (
-                              <span className="text-foreground text-xs truncate">"{event.targetText}"</span>
-                            )}
-                          </div>
-                          <code className="text-muted-foreground text-[10px] block truncate">{event.selector || event.message}</code>
-                        </div>
-                      )}
-                      {event.type === 'input' && (
-                        <div className="space-y-0.5">
-                          <div className="flex items-center gap-2">
-                            <span className="text-emerald-500 font-medium text-xs">input</span>
-                            <span className="text-emerald-400 text-xs truncate">= {event.value ?? ''}</span>
-                          </div>
-                          <code className="text-muted-foreground text-[10px] block truncate">{event.selector}</code>
-                        </div>
-                      )}
-                      {event.type === 'select' && (
-                        <div className="space-y-0.5">
-                          <div className="flex items-center gap-2">
-                            <span className="text-amber-500 font-medium text-xs">select</span>
-                            <span className="text-amber-400 text-xs truncate">→ {event.value ?? ''}</span>
-                          </div>
-                          <code className="text-muted-foreground text-[10px] block truncate">{event.selector}</code>
-                        </div>
-                      )}
-                      {event.type === 'submit' && (
-                        <div className="space-y-0.5">
-                          <span className="text-rose-500 font-medium text-xs">submit</span>
-                          <code className="text-muted-foreground text-[10px] block truncate">{event.selector}</code>
-                        </div>
-                      )}
-                      {event.type === 'navigation' && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-sky-500 font-medium text-xs shrink-0">navigate</span>
-                          <span className="text-sky-400 text-xs truncate">{event.url}</span>
-                        </div>
+                  )}
+
+                  {/* Tags */}
+                  <div>
+                    <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Custom tags</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {recording.tags && recording.tags.length > 0 ? (
+                        recording.tags.map((tag, i) => (
+                          <Badge key={i} variant="secondary" className="text-xs">{tag}</Badge>
+                        ))
+                      ) : (
+                        <span className="text-xs text-muted-foreground">No tags</span>
                       )}
                     </div>
-                    {event.duration && (
-                      <div className="text-muted-foreground text-[10px] font-mono shrink-0 pt-0.5 tabular-nums">
-                        {Math.round(event.duration)}ms
+                  </div>
+
+                  {/* Timestamp */}
+                  <div>
+                    <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Timestamp</p>
+                    <p className="text-sm">{format(new Date(recording.createdAt), "MMM d, yyyy 'at' h:mm a 'GMT'xxx")}</p>
+                  </div>
+
+                  {/* Browser Info */}
+                  {recording.browserInfo && (() => {
+                    const bi = recording.browserInfo as Record<string, unknown>;
+                    const screen = bi.screen as Record<string, number> | undefined;
+                    const viewport = bi.viewport as Record<string, number> | undefined;
+                    return (
+                      <>
+                        {bi.timezone && (
+                          <div>
+                            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Location</p>
+                            <p className="text-sm">{String(bi.timezone)}</p>
+                          </div>
+                        )}
+                        {bi.platform && (
+                          <div>
+                            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">OS</p>
+                            <p className="text-sm">{String(bi.platform)}</p>
+                          </div>
+                        )}
+                        {bi.userAgent && (
+                          <div>
+                            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Browser</p>
+                            <p className="text-sm break-all">{String(bi.userAgent).split(' ').slice(-1)[0]}</p>
+                          </div>
+                        )}
+                        {viewport && (
+                          <div>
+                            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Window size</p>
+                            <p className="text-sm font-mono">{viewport.width}x{viewport.height}</p>
+                          </div>
+                        )}
+                        {screen && (
+                          <div>
+                            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Screen</p>
+                            <p className="text-sm font-mono">{screen.width}x{screen.height} @{screen.dpr}x</p>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+
+                  {/* Stats */}
+                  <div>
+                    <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Stats</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="bg-muted/50 rounded-md p-2.5">
+                        <p className="text-lg font-semibold">{recording.networkLogsCount}</p>
+                        <p className="text-[10px] text-muted-foreground uppercase">Requests</p>
+                      </div>
+                      <div className="bg-muted/50 rounded-md p-2.5">
+                        <p className="text-lg font-semibold text-destructive">{recording.errorCount}</p>
+                        <p className="text-[10px] text-muted-foreground uppercase">Errors</p>
+                      </div>
+                      <div className="bg-muted/50 rounded-md p-2.5">
+                        <p className="text-lg font-semibold">{recording.consoleCount}</p>
+                        <p className="text-[10px] text-muted-foreground uppercase">Console</p>
+                      </div>
+                      <div className="bg-muted/50 rounded-md p-2.5">
+                        <p className="text-lg font-semibold">{recording.clickCount}</p>
+                        <p className="text-[10px] text-muted-foreground uppercase">Clicks</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </ScrollArea>
+            )}
+
+            {/* Log Tabs (Console, Network, Actions) */}
+            {activeTab !== 'info' && (
+              <>
+                {/* Search bar */}
+                <div className="p-2 border-b border-border shrink-0">
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Filter logs..."
+                      className="h-8 pl-8 text-sm"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <ScrollArea className="flex-1">
+                  <div className="divide-y divide-border">
+                    {filteredEvents.map((event, i) => (
+                      <div
+                        key={event.id || i}
+                        onClick={() => setSelectedLog(event)}
+                        className={`px-4 py-2.5 flex items-start gap-3 text-sm cursor-pointer hover:bg-accent/50 transition-colors ${
+                          selectedLog?.id === event.id ? 'bg-accent border-l-2 border-l-primary pl-[14px]' : 'pl-4'
+                        }`}
+                      >
+                        <div className="text-muted-foreground shrink-0 pt-0.5 text-[10px] font-mono tabular-nums">
+                          {event.timestamp}
+                        </div>
+                        <div className="mt-0.5 shrink-0">
+                          {getLogIcon(event.type, event.level, event.status)}
+                        </div>
+                        <div className="flex-1 min-w-0 pt-0.5 overflow-hidden">
+                          {event.type === 'request' && (
+                            <div className="flex items-center gap-2">
+                              <span className={`font-mono font-bold shrink-0 ${
+                                event.method === 'GET' ? 'text-blue-400' :
+                                event.method === 'POST' ? 'text-green-400' : 'text-orange-400'
+                              }`}>{event.method}</span>
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] shrink-0 ${
+                                event.status && event.status >= 400 ? 'bg-destructive/20 text-destructive' : 'bg-muted text-muted-foreground'
+                              }`}>
+                                {event.status || 'PENDING'}
+                              </span>
+                              <span className="truncate text-xs" title={event.url || ''}>{event.url}</span>
+                            </div>
+                          )}
+                          {event.type === 'console' && (
+                            <div className={`truncate text-xs ${
+                              event.level === 'error' ? 'text-destructive' :
+                              event.level === 'warn' ? 'text-orange-400' : 'text-foreground'
+                            }`}>
+                              {event.message}
+                            </div>
+                          )}
+                          {event.type === 'click' && (
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-2">
+                                <span className="text-primary font-medium text-xs">click</span>
+                                {event.targetText && (
+                                  <span className="text-foreground text-xs truncate">"{event.targetText}"</span>
+                                )}
+                              </div>
+                              <code className="text-muted-foreground text-[10px] block truncate">{event.selector || event.message}</code>
+                            </div>
+                          )}
+                          {event.type === 'input' && (
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-2">
+                                <span className="text-emerald-500 font-medium text-xs">input</span>
+                                <span className="text-emerald-400 text-xs truncate">= {event.value ?? ''}</span>
+                              </div>
+                              <code className="text-muted-foreground text-[10px] block truncate">{event.selector}</code>
+                            </div>
+                          )}
+                          {event.type === 'select' && (
+                            <div className="space-y-0.5">
+                              <div className="flex items-center gap-2">
+                                <span className="text-amber-500 font-medium text-xs">select</span>
+                                <span className="text-amber-400 text-xs truncate">→ {event.value ?? ''}</span>
+                              </div>
+                              <code className="text-muted-foreground text-[10px] block truncate">{event.selector}</code>
+                            </div>
+                          )}
+                          {event.type === 'submit' && (
+                            <div className="space-y-0.5">
+                              <span className="text-rose-500 font-medium text-xs">submit</span>
+                              <code className="text-muted-foreground text-[10px] block truncate">{event.selector}</code>
+                            </div>
+                          )}
+                          {event.type === 'navigation' && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-sky-500 font-medium text-xs shrink-0">navigate</span>
+                              <span className="text-sky-400 text-xs truncate">{event.url}</span>
+                            </div>
+                          )}
+                        </div>
+                        {event.duration && (
+                          <div className="text-muted-foreground text-[10px] font-mono shrink-0 pt-0.5 tabular-nums">
+                            {Math.round(event.duration)}ms
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {filteredEvents.length === 0 && (
+                      <div className="p-8 text-center text-muted-foreground text-sm">
+                        No logs match your filters.
                       </div>
                     )}
                   </div>
-                ))}
-                {filteredEvents.length === 0 && (
-                  <div className="p-8 text-center text-muted-foreground text-sm">
-                    No logs match your filters.
-                  </div>
-                )}
-              </div>
-            </ScrollArea>
+                </ScrollArea>
+              </>
+            )}
           </div>
         </div>
 

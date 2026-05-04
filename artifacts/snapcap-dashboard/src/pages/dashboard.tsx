@@ -188,7 +188,7 @@ export default function Dashboard() {
                           const path = recording.videoObjectPath;
                           const thumbPath = recording.thumbnailObjectPath;
                           const apiBase = import.meta.env.VITE_API_URL ?? "";
-                          const storageUrl = (p: string) => `${apiBase}/api/storage/${p.replace(/^\/objects\//, '').replace(/^\/local-media\//, 'local/')}`;
+                          const storageUrl = (p: string) => `${apiBase}/api/storage${p.startsWith('/') ? p : `/${p}`}`;
                           const isImage = path && /\.(png|jpg|jpeg|gif|webp)$/i.test(path);
                           const isVideo = path && !isImage && (
                             /\.(webm|mp4|mov|avi|mkv)$/i.test(path) ||

@@ -282,8 +282,12 @@ function Ready({
       kind: 'bg:capture',
       workspaceId: auth.activeWorkspaceId,
     });
-    if (res?.ok) setUi({ kind: 'result', ok: true, url: res.url, note: res.note });
-    else setUi({ kind: 'result', ok: false, error: res?.message ?? 'Capture failed' });
+    if (res?.ok) {
+      // Screenshot now shows preview modal on the page — close popup
+      window.close();
+    } else {
+      setUi({ kind: 'result', ok: false, error: res?.message ?? 'Capture failed' });
+    }
   }
 
   /**

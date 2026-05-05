@@ -3,99 +3,131 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Velo QA · Preview</title>
+    <title>VeloCap · Preview</title>
     <style>
       :root {
-        color-scheme: dark;
-        --bg: #09090b;
-        --fg: #fafafa;
-        --muted: #a1a1aa;
-        --panel: #18181b;
-        --border: #27272a;
+        color-scheme: light;
+        --bg: #ffffff;
+        --fg: #1a1a2e;
+        --muted: #6b7280;
+        --surface: #f4f5f7;
+        --border: #e5e7eb;
         --accent: #7c3aed;
-        --ok: #22c55e;
+        --accent-hover: #6d28d9;
+        --ok: #10b981;
         --err: #ef4444;
       }
-      * { box-sizing: border-box; }
-      html, body { height: 100%; }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { height: 100%; overflow: hidden; }
       body {
-        margin: 0;
-        background: var(--bg);
+        background: var(--surface);
         color: var(--fg);
-        font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font: 13px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
       }
       header {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 14px 24px;
+        padding: 12px 20px;
+        background: var(--bg);
         border-bottom: 1px solid var(--border);
       }
-      .brand { font-weight: 700; letter-spacing: .2px; font-size: 16px; }
-      .brand span { color: var(--accent); }
-      .meta { color: var(--muted); font-size: 13px; }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .brand img { height: 22px; width: auto; }
+      .brand-name { font-weight: 700; font-size: 15px; letter-spacing: -0.3px; }
+      .meta { color: var(--muted); font-size: 12px; }
       main {
         max-width: 960px;
         margin: 0 auto;
-        padding: 24px;
-        display: grid;
-        gap: 16px;
+        padding: 16px 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        height: calc(100vh - 49px);
+        overflow: hidden;
       }
       video {
         width: 100%;
-        max-height: 68vh;
+        max-height: 65vh;
         background: #000;
         border-radius: 10px;
         display: block;
       }
       .card {
-        background: var(--panel);
+        background: var(--bg);
         border: 1px solid var(--border);
         border-radius: 10px;
-        padding: 16px;
+        padding: 14px 16px;
         display: grid;
-        gap: 12px;
+        gap: 10px;
       }
-      label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
+      label { font-size: 11px; color: var(--muted); display: block; margin-bottom: 4px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.3px; }
       input[type=text] {
         width: 100%;
+        background: var(--surface);
+        color: var(--fg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 9px 12px;
+        font: inherit;
+        font-size: 13px;
+      }
+      input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; }
+      .row.right { justify-content: flex-end; }
+      button {
         background: var(--bg);
         color: var(--fg);
         border: 1px solid var(--border);
         border-radius: 8px;
-        padding: 10px 12px;
+        padding: 8px 20px;
         font: inherit;
+        font-weight: 500;
+        font-size: 13px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        letter-spacing: 0.01em;
       }
-      input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-      .row { display: flex; gap: 10px; flex-wrap: wrap; }
-      .row.right { justify-content: flex-end; }
-      button {
-        background: var(--panel);
+      button:active:not(:disabled) { transform: scale(0.97); }
+      button:disabled { opacity: .45; cursor: default; }
+      button.primary {
+        background: var(--accent);
+        color: #fff;
+        border-color: transparent;
+        box-shadow: 0 1px 3px rgba(124,58,237,0.3);
+      }
+      button.primary:hover:not(:disabled) { background: var(--accent-hover); box-shadow: 0 2px 6px rgba(124,58,237,0.4); }
+      button.secondary {
+        background: var(--bg);
         color: var(--fg);
         border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 10px 16px;
-        font: inherit;
-        font-weight: 600;
-        cursor: pointer;
       }
-      button.primary { background: var(--accent); color: #ffffff; border-color: transparent; }
-      button.danger { background: transparent; color: var(--err); border-color: #7f1d1d; }
-      button:hover:not(:disabled) { filter: brightness(1.08); }
-      button:disabled { opacity: .5; cursor: default; }
-      .status { color: var(--muted); font-size: 13px; min-height: 18px; }
+      button.secondary:hover:not(:disabled) { background: var(--surface); border-color: #d1d5db; }
+      button.ghost {
+        background: transparent;
+        border-color: transparent;
+        color: var(--muted);
+        padding: 8px 14px;
+      }
+      button.ghost:hover:not(:disabled) { color: var(--fg); background: var(--surface); }
+      .status { color: var(--muted); font-size: 12px; min-height: 16px; }
       .status.ok { color: var(--ok); }
       .status.err { color: var(--err); }
       .link {
         display: block;
         color: var(--accent);
         text-decoration: none;
-        background: var(--bg);
-        padding: 10px 12px;
+        background: var(--surface);
+        padding: 9px 12px;
         border-radius: 8px;
         border: 1px solid var(--border);
         font-family: ui-monospace, monospace;
-        font-size: 12.5px;
+        font-size: 11px;
         word-break: break-all;
       }
       .link:hover { border-color: var(--accent); }
@@ -108,22 +140,103 @@
         background: transparent;
         border: none;
         color: var(--muted);
-        font-size: 24px;
+        font-size: 20px;
         cursor: pointer;
         padding: 4px 8px;
         line-height: 1;
         border-radius: 6px;
         transition: background 0.15s, color 0.15s;
       }
-      .close-btn:hover {
-        background: var(--panel);
-        color: var(--fg);
+      .close-btn:hover { background: var(--surface); color: var(--fg); }
+      /* Annotation toolbar */
+      .annotation-toolbar {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+        padding: 6px 10px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.06);
       }
+      .annotation-toolbar button {
+        width: 34px;
+        height: 34px;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 15px;
+        border-radius: 8px;
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      .annotation-toolbar button:hover { background: var(--surface); color: var(--fg); }
+      .annotation-toolbar button.active {
+        background: var(--accent);
+        color: #fff;
+        border-color: transparent;
+      }
+      .annotation-toolbar .separator {
+        width: 1px;
+        height: 22px;
+        background: var(--border);
+        margin: 0 4px;
+        flex-shrink: 0;
+      }
+      .annotation-toolbar input[type="color"] {
+        width: 30px;
+        height: 30px;
+        border: 2px solid var(--border);
+        border-radius: 8px;
+        padding: 2px;
+        cursor: pointer;
+        background: transparent;
+        -webkit-appearance: none;
+      }
+      .annotation-toolbar input[type="color"]::-webkit-color-swatch-wrapper { padding: 2px; }
+      .annotation-toolbar input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
+      .canvas-container {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex: 1;
+        min-height: 0;
+      }
+      .canvas-container canvas {
+        display: block;
+      }
+      /* Bottom action bar — single row, no scroll */
+      .bottom-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        flex-shrink: 0;
+      }
+      .bottom-bar input[type=text] {
+        flex: 1;
+        min-width: 0;
+        margin: 0;
+        padding: 7px 10px;
+        font-size: 12px;
+      }
+      .bottom-bar button { white-space: nowrap; padding: 7px 14px; font-size: 12px; }
+      .bottom-bar .status { font-size: 11px; white-space: nowrap; }
     </style>
   </head>
   <body>
     <header>
-      <div class="brand">Velo<span>QA</span></div>
+      <div class="brand">
+        <img src="../../icons/logo.svg" alt="VeloCap" />
+      </div>
       <div class="meta" id="meta"></div>
       <button class="close-btn" id="close-header" title="Close">×</button>
     </header>

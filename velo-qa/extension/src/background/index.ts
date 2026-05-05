@@ -53,6 +53,8 @@ type BgState =
       capturedContext: CapturePayload | null;
       /** JPEG thumbnail captured at recording stop. */
       thumbnailDataUrl: string | null;
+      /** Whether this is a video or screenshot preview. */
+      mediaType: 'video' | 'screenshot';
     };
 
 let state: BgState = { kind: 'idle' };
@@ -75,6 +77,7 @@ async function persistPendingPreview(): Promise<void> {
     note: state.note,
     capturedContext: state.capturedContext,
     thumbnailDataUrl: state.thumbnailDataUrl,
+    mediaType: state.mediaType,
     savedAt: Date.now(),
   };
   await chrome.storage.local.set({ [PENDING_PREVIEW_STORAGE_KEY]: data });
@@ -105,6 +108,7 @@ async function restorePendingPreview(): Promise<boolean> {
     note: data.note,
     capturedContext: data.capturedContext,
     thumbnailDataUrl: data.thumbnailDataUrl ?? null,
+    mediaType: data.mediaType ?? 'video',
   };
   console.log('[veloqa/bg] restored pending preview from storage', {
     dataUrlLength: data.dataUrl.length,
@@ -358,23 +362,42 @@ async function handleScreenshot(req: CaptureRequest): Promise<BgResponse> {
         .catch(() => ({ payload: fallbackContext(tab), injected: true })),
     ]);
     const ctx = ctxResult.payload;
-
-    const jam = await api.createJam({
-      workspaceId: req.workspaceId,
-      type: 'SCREENSHOT',
-      title: req.title ?? undefined,
-      page: ctx.page,
-      device: ctx.device,
-      console: ctx.console,
-      network: ctx.network,
-      actions: ctx.actions,
-      visibility: 'PUBLIC',
-      media: { kind: 'screenshot', dataUrl: screenshotDataUrl },
-    });
     const note = ctxResult.injected && ctx.console.length === 0 && ctx.network.length === 0
       ? 'No console/network — reload the page and reproduce before capturing.'
       : undefined;
-    return { ok: true, id: jam.id, url: jam.url, note };
+
+    const bytes = Math.round((screenshotDataUrl.length - 22) * 3 / 4);
+
+    state = {
+      kind: 'pending-preview',
+      workspaceId: req.workspaceId,
+      tabId: tab.id,
+      dataUrl: screenshotDataUrl,
+      durationMs: 0,
+      bytes,
+      capturedContext: ctx,
+      thumbnailDataUrl: null,
+      mediaType: 'screenshot',
+      ...(note ? { note } : {}),
+    };
+
+    await persistPendingPreview();
+
+    // Show preview modal on the active tab
+    try {
+      await chrome.tabs.sendMessage(tab.id, {
+        kind: 'preview:show',
+        dataUrl: screenshotDataUrl,
+        durationMs: 0,
+        bytes,
+        mimeType: 'image/png',
+        note,
+      });
+    } catch {
+      void chrome.tabs.create({ url: chrome.runtime.getURL('src/preview/index.html') });
+    }
+
+    return { ok: true, id: '', url: '' };
   } catch (e) {
     if (e instanceof ApiError) return { ok: false, code: e.code, message: e.message };
     return { ok: false, code: 'capture_failed', message: e instanceof Error ? e.message : String(e) };
@@ -653,6 +676,7 @@ async function onRecordedFromOffscreen(msg: {
       bytes: msg.bytes,
       capturedContext,
       thumbnailDataUrl,
+      mediaType: 'video',
       ...(msg.note ? { note: msg.note } : {}),
     };
 
@@ -701,7 +725,7 @@ async function onRecordedFromOffscreen(msg: {
  * User clicked Upload in the preview modal. Package the buffered dataUrl
  * with the captured context (collected at start + end of recording) and POST to /jams.
  */
-async function uploadPendingPreview(req: { title?: string }): Promise<BgResponse> {
+async function uploadPendingPreview(req: { title?: string; annotatedDataUrl?: string }): Promise<BgResponse> {
   console.log('[veloqa/bg] uploadPendingPreview called, state.kind:', state.kind);
 
   // If state is idle, try to restore from storage (service worker may have restarted)
@@ -737,18 +761,23 @@ async function uploadPendingPreview(req: { title?: string }): Promise<BgResponse
       actionsCount: ctx.actions.length,
     });
 
+    const isScreenshot = pending.mediaType === 'screenshot';
+    const finalDataUrl = isScreenshot && req.annotatedDataUrl ? req.annotatedDataUrl : pending.dataUrl;
+
     const jam = await api.createJam({
       workspaceId: pending.workspaceId,
-      type: 'VIDEO',
+      type: isScreenshot ? 'SCREENSHOT' : 'VIDEO',
       title: req.title ?? undefined,
       page: ctx.page,
       device: ctx.device,
       console: ctx.console,
       network: ctx.network,
       actions: ctx.actions,
-      durationMs: pending.durationMs,
+      ...(isScreenshot ? {} : { durationMs: pending.durationMs }),
       visibility: 'PUBLIC',
-      media: { kind: 'video', dataUrl: pending.dataUrl },
+      media: isScreenshot
+        ? { kind: 'screenshot', dataUrl: finalDataUrl }
+        : { kind: 'video', dataUrl: pending.dataUrl },
       thumbnail: pending.thumbnailDataUrl ? { dataUrl: pending.thumbnailDataUrl } : undefined,
     });
     state = { kind: 'idle' };
@@ -832,7 +861,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg?.kind === 'bg:preview-upload') {
-    void uploadPendingPreview({ title: msg.title }).then(sendResponse);
+    void uploadPendingPreview({ title: msg.title, annotatedDataUrl: msg.annotatedDataUrl }).then(sendResponse);
     return true;
   }
   if (msg?.kind === 'bg:preview-discard') {
@@ -851,7 +880,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       dataUrl: state.dataUrl,
       durationMs: state.durationMs,
       bytes: state.bytes,
-      mimeType: 'video/webm',
+      mimeType: state.mediaType === 'screenshot' ? 'image/png' : 'video/webm',
+      mediaType: state.mediaType,
       ...(state.note ? { note: state.note } : {}),
     });
     return false;
@@ -867,7 +897,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chrome.downloads.download(
       {
         url: state.dataUrl,
-        filename: `veloqa-${Date.now()}.webm`,
+        filename: `veloqa-${Date.now()}.${state.mediaType === 'screenshot' ? 'png' : 'webm'}`,
         saveAs: true,
       },
       (downloadId) => {

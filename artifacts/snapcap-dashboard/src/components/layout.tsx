@@ -1,34 +1,27 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useUser, useClerk } from "@clerk/react";
-import { Activity, Settings, LogOut, Menu, X } from "lucide-react";
+import { Activity, Settings, LogOut, Menu, ChevronDown } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
-
-// The sidebar is now a togglable off-canvas drawer (closed by default).
-// Persisted in localStorage so the user's choice sticks across reloads.
-const STORAGE_KEY = "velorec.sidebar.open";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
   const { user } = useUser();
   const { signOut } = useClerk();
-  const [open, setOpen] = useState<boolean>(() => {
-    try { return localStorage.getItem(STORAGE_KEY) === "1"; } catch { return false; }
-  });
-
-  // Persist + reflect state.
-  useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEY, open ? "1" : "0"); } catch { /* ignore */ }
-  }, [open]);
-
-  // Close on Escape for keyboard parity.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
+  const [expanded, setExpanded] = useState(false);
 
   const navItems = [
     { href: "/dashboard", label: "Dashboard", icon: Activity },
@@ -36,83 +29,138 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   ];
 
   return (
-    <div className="flex h-screen w-full bg-background text-foreground overflow-hidden">
-      {/* Floating menu button — always visible, top-left */}
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={() => setOpen(true)}
-        className={`fixed top-4 left-4 z-40 bg-card border border-border shadow-sm ${open ? "opacity-0 pointer-events-none" : "opacity-100"} transition-opacity`}
-        aria-label="Open navigation"
-      >
-        <Menu size={18} />
-      </Button>
-
-      {/* Backdrop — click to close. Shown when drawer is open. */}
-      <div
-        className={`fixed inset-0 bg-black/50 z-40 transition-opacity ${open ? "opacity-100" : "opacity-0 pointer-events-none"}`}
-        onClick={() => setOpen(false)}
-        aria-hidden="true"
-      />
-
-      {/* Off-canvas sidebar */}
-      <aside
-        className={`fixed top-0 left-0 h-full w-64 bg-sidebar border-r border-border flex flex-col z-50 shadow-2xl transition-transform duration-200 ease-out ${
-          open ? "translate-x-0" : "-translate-x-full"
-        }`}
-        role="navigation"
-        aria-label="Sidebar"
-      >
-        <div className="p-6 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="Velo QA" className="w-12 h-12 object-contain" />
-            <span className="font-bold text-lg tracking-tight">Velo QA</span>
-          </div>
-          <Button variant="ghost" size="icon" onClick={() => setOpen(false)} aria-label="Close navigation">
-            <X size={18} />
-          </Button>
-        </div>
-
-        <nav className="flex-1 px-4 space-y-2">
-          {navItems.map((item) => (
-            <Link key={item.href} href={item.href}>
-              <div
-                onClick={() => setOpen(false)}
-                className={`flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer transition-colors ${
-                  location === item.href || location.startsWith(item.href + "/")
-                    ? "bg-primary/10 text-primary"
-                    : "hover:bg-accent text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <item.icon size={18} />
-                <span className="font-medium text-sm">{item.label}</span>
+    <TooltipProvider delayDuration={300}>
+      <div className="flex flex-col h-screen w-full bg-background text-foreground overflow-hidden">
+        {/* Top bar — full width, always on top */}
+        <header className="shrink-0 h-14 border-b border-border bg-card flex items-center justify-between px-4 z-40">
+          <div className="flex items-center gap-12">
+            <button
+              onClick={() => setExpanded(!expanded)}
+              className="p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-color cursor-pointer"
+              aria-label="Toggle sidebar"
+            >
+              <Menu size={20} />
+            </button>
+            <Link href="/dashboard">
+              <div className="flex items-center gap-2.5 cursor-pointer">
+                <img src="/logo-icon.svg" alt="VeloCap" className="w-7 h-7 object-contain" />
+                <span className="font-bold text-base tracking-tight">VeloCap</span>
               </div>
             </Link>
-          ))}
-        </nav>
+          </div>
 
-        <div className="p-4 border-t border-border">
-          <div className="flex items-center gap-3">
-            <Avatar className="h-9 w-9">
-              <AvatarImage src={user?.imageUrl} />
-              <AvatarFallback>{user?.firstName?.[0] || "U"}</AvatarFallback>
-            </Avatar>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">
-                {user?.fullName || user?.primaryEmailAddress?.emailAddress}
-              </p>
+          {user && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent transition-colors outline-none">
+                  <Avatar className="h-7 w-7">
+                    <AvatarImage src={user.imageUrl} />
+                    <AvatarFallback className="text-xs">{user.firstName?.[0] || "U"}</AvatarFallback>
+                  </Avatar>
+                  <span className="text-sm font-medium hidden sm:inline">{user.fullName || user.primaryEmailAddress?.emailAddress}</span>
+                  <ChevronDown size={14} className="text-muted-foreground" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <div className="px-2 py-1.5">
+                  <p className="text-sm font-medium">{user.fullName}</p>
+                  <p className="text-xs text-muted-foreground truncate">{user.primaryEmailAddress?.emailAddress}</p>
+                </div>
+                <DropdownMenuSeparator />
+                <Link href="/settings">
+                  <DropdownMenuItem className="cursor-pointer gap-2">
+                    <Settings size={14} />
+                    Settings
+                  </DropdownMenuItem>
+                </Link>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => signOut()} className="cursor-pointer gap-2 text-destructive focus:text-destructive">
+                  <LogOut size={14} />
+                  Sign out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </header>
+
+        {/* Below the top bar: sidebar + content side by side */}
+        <div className="flex flex-1 overflow-hidden">
+          {/* Sidebar — icon strip under the top bar */}
+          <aside
+            className={`shrink-0 h-full bg-card border-r border-border flex flex-col items-center transition-all duration-200 ease-out ${
+              expanded ? "w-52" : "w-16"
+            }`}
+          >
+            <nav className="flex-1 w-full py-3 space-y-1 px-2">
+              {navItems.map((item) => {
+                const active = location === item.href || location.startsWith(item.href + "/");
+                const button = (
+                  <Link key={item.href} href={item.href}>
+                    <div
+                      className={`flex items-center gap-3 rounded-lg cursor-pointer transition-colors ${
+                        expanded ? "px-3 py-2.5" : "justify-center py-2.5"
+                      } ${
+                        active
+                          ? "bg-primary/10 text-primary"
+                          : "hover:bg-accent text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <item.icon size={20} className="shrink-0" />
+                      {expanded && <span className="text-sm font-medium whitespace-nowrap">{item.label}</span>}
+                    </div>
+                  </Link>
+                );
+
+                if (expanded) return <div key={item.href}>{button}</div>;
+
+                return (
+                  <Tooltip key={item.href}>
+                    <TooltipTrigger asChild>{button}</TooltipTrigger>
+                    <TooltipContent side="right" sideOffset={8}>
+                      {item.label}
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })}
+            </nav>
+
+            {/* Bottom avatar */}
+            <div className={`w-full border-t border-border p-2 ${expanded ? "px-3" : ""}`}>
+              {expanded ? (
+                <div className="flex items-center gap-3 px-2 py-2">
+                  <Avatar className="h-8 w-8 shrink-0">
+                    <AvatarImage src={user?.imageUrl} />
+                    <AvatarFallback className="text-xs">{user?.firstName?.[0] || "U"}</AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium truncate">{user?.fullName}</p>
+                    <p className="text-[10px] text-muted-foreground truncate">{user?.primaryEmailAddress?.emailAddress}</p>
+                  </div>
+                </div>
+              ) : (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="flex justify-center py-2 cursor-default">
+                      <Avatar className="h-8 w-8">
+                        <AvatarImage src={user?.imageUrl} />
+                        <AvatarFallback className="text-xs">{user?.firstName?.[0] || "U"}</AvatarFallback>
+                      </Avatar>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" sideOffset={8}>
+                    {user?.fullName || "Account"}
+                  </TooltipContent>
+                </Tooltip>
+              )}
             </div>
-            <Button variant="ghost" size="icon" onClick={() => signOut()} aria-label="Sign out">
-              <LogOut size={16} className="text-muted-foreground" />
-            </Button>
+          </aside>
+
+          {/* Page content */}
+          <div className="flex-1 overflow-auto min-w-0">
+            {children}
           </div>
         </div>
-      </aside>
-
-      {/* Main content fills the whole viewport now that the sidebar is off-canvas */}
-      <main className="flex-1 flex flex-col h-full overflow-hidden bg-background">
-        <div className="flex-1 overflow-auto">{children}</div>
-      </main>
-    </div>
+      </div>
+    </TooltipProvider>
   );
 }

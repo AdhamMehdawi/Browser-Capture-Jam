@@ -1,11 +1,12 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useParams, Link } from "wouter";
 import { format } from "date-fns";
+import "plyr/dist/plyr.css";
 import {
   ArrowLeft, Share2, Globe, Terminal, MousePointerClick, Activity,
   Search, Info, Clock, AlertCircle, Play, Pause, AlertTriangle,
   TextCursorInput, MousePointer, Navigation, SquareMousePointer, CornerDownLeft,
-  X as CloseIcon,
+  X as CloseIcon, Copy, Check,
 } from "lucide-react";
 import { useGetRecording, useCreateShareLink } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,29 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { NetworkLogEntry, getGetRecordingQueryKey } from "@workspace/api-client-react";
+
+// ============================================================
+// CopyButton — icon button that shows a checkmark after copying
+// ============================================================
+function CopyButton({ text, title = "Copy", size = 14 }: { text: string; title?: string; size?: number }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <button
+      onClick={handleCopy}
+      className={`p-1 rounded transition-colors shrink-0 ${copied ? 'text-green-500' : 'text-muted-foreground hover:text-foreground hover:bg-accent'}`}
+      title={copied ? 'Copied!' : title}
+    >
+      {copied ? <Check size={size} /> : <Copy size={size} />}
+    </button>
+  );
+}
 
 // ============================================================
 // PayloadBlock — readable viewer for request/response bodies
@@ -101,7 +125,10 @@ function FixedVideoPlayer({
   const [src, setSrc] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const createdBlobUrl = useRef<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const plyrRef = useRef<{ destroy(): void } | null>(null);
 
+  // Fetch and patch WebM duration
   useEffect(() => {
     let cancelled = false;
     setSrc(null);
@@ -151,17 +178,46 @@ function FixedVideoPlayer({
     };
   }, [videoUrl, knownDurationMs]);
 
+  // Initialize Plyr when src is ready
+  useEffect(() => {
+    if (!src || !videoRef.current) return;
+    let player: { destroy(): void } | null = null;
+
+    import('plyr').then((mod) => {
+      const PlyrClass = (mod.default ?? mod) as unknown as new (el: HTMLVideoElement, opts: Record<string, unknown>) => { destroy(): void };
+      if (!videoRef.current) return;
+      player = new PlyrClass(videoRef.current, {
+        controls: [
+          'play-large', 'rewind', 'play', 'fast-forward',
+          'progress', 'current-time', 'duration',
+          'mute', 'volume', 'settings', 'fullscreen',
+        ],
+        settings: ['speed'],
+        speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] },
+        keyboard: { focused: true, global: false },
+        tooltips: { controls: true, seek: true },
+        seekTime: 5,
+      });
+      plyrRef.current = player;
+    });
+
+    return () => {
+      if (player) {
+        player.destroy();
+        plyrRef.current = null;
+      }
+    };
+  }, [src]);
+
   return (
-    <div className="bg-black flex-1 relative w-full flex items-center justify-center">
+    <div className="bg-black relative w-full h-full plyr-container">
       {src ? (
         <video
+          ref={videoRef}
           src={src}
-          controls
-          className="w-full h-full object-contain"
+          className="w-full h-full"
           preload="metadata"
           onLoadedMetadata={(e) => {
-            // Belt-and-braces: if the patcher silently returned the raw
-            // blob, fall back to the seek-to-huge-time hack.
             const v = e.currentTarget;
             if (v.duration === Infinity || Number.isNaN(v.duration)) {
               const onSeeked = () => {
@@ -178,7 +234,7 @@ function FixedVideoPlayer({
           Video failed to load: {error}
         </div>
       ) : (
-        <div className="text-muted-foreground text-sm">Preparing video…</div>
+        <div className="text-muted-foreground text-sm p-6 text-center">Preparing video...</div>
       )}
     </div>
   );
@@ -274,13 +330,6 @@ function PayloadBlock({ label, body }: { label: string; body: string }) {
   const bytes = new Blob([body]).size;
   const sizeLabel = bytes > 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${bytes} B`;
 
-  const copy = () => {
-    navigator.clipboard.writeText(formatted).then(
-      () => toast.success("Copied to clipboard"),
-      () => toast.error("Copy failed"),
-    );
-  };
-
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
@@ -290,17 +339,10 @@ function PayloadBlock({ label, body }: { label: string; body: string }) {
             {kind}
           </span>
           <span className="text-[10px] text-muted-foreground">{sizeLabel}</span>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2 text-[10px] uppercase"
-            onClick={copy}
-          >
-            Copy
-          </Button>
+          <CopyButton text={formatted} title="Copy payload" />
         </div>
       </div>
-      <pre className="bg-muted/50 border border-border/50 rounded-md p-3 font-mono text-xs overflow-x-auto whitespace-pre break-all max-h-[320px] overflow-y-auto">
+      <pre className="bg-muted/50 border border-border/50 rounded-md p-3 font-mono text-xs whitespace-pre-wrap break-all max-h-[320px] overflow-y-auto">
         {kind === "json" ? (
           <code
             className="block"
@@ -364,20 +406,6 @@ export default function RecordingViewer() {
     });
   };
 
-  const copyToClipboard = async () => {
-    try {
-      await navigator.clipboard.writeText(shareUrl);
-      toast.success("Copied to clipboard");
-    } catch {
-      // Fallback for when clipboard API is blocked
-      const input = document.querySelector<HTMLInputElement>('input[readonly]');
-      if (input) {
-        input.select();
-        document.execCommand('copy');
-        toast.success("Copied to clipboard");
-      }
-    }
-  };
 
   const filteredEvents = useMemo(() => {
     if (!recording?.events) return [];
@@ -438,9 +466,11 @@ export default function RecordingViewer() {
   const apiBase = import.meta.env.VITE_API_URL ?? "";
   // videoObjectPath is either the new `/objects/<id>.<ext>` (Azure Blob)
   // or the legacy `/objects/local/<id>.<ext>` (local disk — gone, 404s).
-  const videoUrl = recording.videoObjectPath
-    ? `${apiBase}/api/storage${recording.videoObjectPath}`
-    : null;
+  const mediaPath = recording.videoObjectPath;
+  const mediaUrl = mediaPath ? `${apiBase}/api/storage${mediaPath}` : null;
+  const isScreenshot = mediaPath && /\.(png|jpg|jpeg|gif|webp)$/i.test(mediaPath);
+  const videoUrl = mediaUrl && !isScreenshot ? mediaUrl : null;
+  const screenshotUrl = mediaUrl && isScreenshot ? mediaUrl : null;
 
   return (
     <div className="flex flex-col h-full bg-background overflow-hidden">
@@ -471,37 +501,7 @@ export default function RecordingViewer() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            onClick={() => {
-              const spec = generateCypressSpec(recording.events ?? [], recording.pageUrl);
-              navigator.clipboard.writeText(spec).then(
-                () => toast.success('Cypress spec copied'),
-                () => toast.error('Copy failed'),
-              );
-            }}
-            variant="outline"
-            className="gap-2 font-medium"
-            title="Generate a Cypress spec from captured actions"
-          >
-            <Activity size={16} /> Copy Cypress
-          </Button>
-          <Button
-            onClick={() => {
-              const spec = generateCypressSpec(recording.events ?? [], recording.pageUrl);
-              const blob = new Blob([spec], { type: 'text/javascript' });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = `velorec-${recording.id}.cy.js`;
-              a.click();
-              setTimeout(() => URL.revokeObjectURL(url), 1000);
-            }}
-            variant="outline"
-            className="gap-2 font-medium"
-          >
-            Download .cy.js
-          </Button>
-          <Button onClick={handleShare} variant="outline" className="gap-2 font-medium">
+          <Button onClick={handleShare} variant="outline" className="gap-2 font-medium active:scale-95 transition-transform">
             <Share2 size={16} /> Share
           </Button>
         </div>
@@ -510,18 +510,30 @@ export default function RecordingViewer() {
       {/* Main Content - Video on left, Logs on right */}
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
         {/* Left Column - Video (takes most of the screen) */}
-        {videoUrl && (
-          <div className="flex-1 flex flex-col border-r border-border bg-black min-w-0">
-            <FixedVideoPlayer videoUrl={videoUrl} knownDurationMs={recording.duration} />
+        {(videoUrl || screenshotUrl) && (
+          <div className="flex-1 flex flex-col border-r border-border bg-muted/30 min-w-0 overflow-auto">
+            <div className="flex items-start justify-center p-4 pt-6">
+              <div className="w-full max-w-6xl">
+                {videoUrl ? (
+                  <div className="rounded-lg overflow-hidden shadow-lg bg-black aspect-video">
+                    <FixedVideoPlayer videoUrl={videoUrl} knownDurationMs={recording.duration} />
+                  </div>
+                ) : screenshotUrl ? (
+                  <div className="rounded-lg overflow-hidden shadow-lg bg-black">
+                    <img src={screenshotUrl} alt={recording.title} className="w-full h-auto" />
+                  </div>
+                ) : null}
+              </div>
+            </div>
           </div>
         )}
 
         {/* Right Column - Info & Logs Sidebar */}
-        <div className={`md:w-[380px] lg:w-[420px] shrink-0 flex flex-col overflow-hidden ${!videoUrl ? 'flex-1 w-full' : ''}`}>
+        <div className={`md:w-[380px] lg:w-[420px] shrink-0 flex flex-col ${!videoUrl && !screenshotUrl ? 'flex-1 w-full' : ''}`}>
           {/* Tabs */}
-          <div className="border-b border-border bg-card shrink-0">
+          <div className="border-b border-border bg-card shrink-0 overflow-x-auto">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-              <TabsList className="w-full justify-start rounded-none border-0 bg-transparent h-auto p-0">
+              <TabsList className="w-max min-w-full justify-start rounded-none border-0 bg-transparent h-auto p-0">
                 {[
                   { value: 'info', label: 'Info', icon: <Info size={14} /> },
                   { value: 'console', label: 'Console', icon: <Terminal size={14} /> },
@@ -659,101 +671,157 @@ export default function RecordingViewer() {
                   </div>
                 </div>
 
-                <ScrollArea className="flex-1">
-                  <div className="divide-y divide-border">
-                    {filteredEvents.map((event, i) => (
-                      <div
-                        key={event.id || i}
-                        onClick={() => setSelectedLog(event)}
-                        className={`px-4 py-2.5 flex items-start gap-3 text-sm cursor-pointer hover:bg-accent/50 transition-colors ${
-                          selectedLog?.id === event.id ? 'bg-accent border-l-2 border-l-primary pl-[14px]' : 'pl-4'
-                        }`}
-                      >
-                        <div className="text-muted-foreground shrink-0 pt-0.5 text-[10px] font-mono tabular-nums">
-                          {event.timestamp}
-                        </div>
-                        <div className="mt-0.5 shrink-0">
-                          {getLogIcon(event.type, event.level, event.status)}
-                        </div>
-                        <div className="flex-1 min-w-0 pt-0.5 overflow-hidden">
-                          {event.type === 'request' && (
-                            <div className="flex items-center gap-2">
-                              <span className={`font-mono font-bold shrink-0 ${
-                                event.method === 'GET' ? 'text-blue-400' :
-                                event.method === 'POST' ? 'text-green-400' : 'text-orange-400'
-                              }`}>{event.method}</span>
-                              <span className={`px-1.5 py-0.5 rounded text-[10px] shrink-0 ${
-                                event.status && event.status >= 400 ? 'bg-destructive/20 text-destructive' : 'bg-muted text-muted-foreground'
-                              }`}>
-                                {event.status || 'PENDING'}
-                              </span>
-                              <span className="truncate text-xs" title={event.url || ''}>{event.url}</span>
-                            </div>
-                          )}
-                          {event.type === 'console' && (
-                            <div className={`truncate text-xs ${
-                              event.level === 'error' ? 'text-destructive' :
-                              event.level === 'warn' ? 'text-orange-400' : 'text-foreground'
-                            }`}>
-                              {event.message}
-                            </div>
-                          )}
-                          {event.type === 'click' && (
-                            <div className="space-y-0.5">
-                              <div className="flex items-center gap-2">
-                                <span className="text-primary font-medium text-xs">click</span>
-                                {event.targetText && (
-                                  <span className="text-foreground text-xs truncate">"{event.targetText}"</span>
-                                )}
-                              </div>
-                              <code className="text-muted-foreground text-[10px] block truncate">{event.selector || event.message}</code>
-                            </div>
-                          )}
-                          {event.type === 'input' && (
-                            <div className="space-y-0.5">
-                              <div className="flex items-center gap-2">
-                                <span className="text-emerald-500 font-medium text-xs">input</span>
-                                <span className="text-emerald-400 text-xs truncate">= {event.value ?? ''}</span>
-                              </div>
-                              <code className="text-muted-foreground text-[10px] block truncate">{event.selector}</code>
-                            </div>
-                          )}
-                          {event.type === 'select' && (
-                            <div className="space-y-0.5">
-                              <div className="flex items-center gap-2">
-                                <span className="text-amber-500 font-medium text-xs">select</span>
-                                <span className="text-amber-400 text-xs truncate">→ {event.value ?? ''}</span>
-                              </div>
-                              <code className="text-muted-foreground text-[10px] block truncate">{event.selector}</code>
-                            </div>
-                          )}
-                          {event.type === 'submit' && (
-                            <div className="space-y-0.5">
-                              <span className="text-rose-500 font-medium text-xs">submit</span>
-                              <code className="text-muted-foreground text-[10px] block truncate">{event.selector}</code>
-                            </div>
-                          )}
-                          {event.type === 'navigation' && (
-                            <div className="flex items-center gap-2">
-                              <span className="text-sky-500 font-medium text-xs shrink-0">navigate</span>
-                              <span className="text-sky-400 text-xs truncate">{event.url}</span>
-                            </div>
-                          )}
-                        </div>
-                        {event.duration && (
-                          <div className="text-muted-foreground text-[10px] font-mono shrink-0 pt-0.5 tabular-nums">
-                            {Math.round(event.duration)}ms
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                {/* Network tab — table layout */}
+                {activeTab === 'request' && (
+                  <div className="flex-1 overflow-auto">
+                    <table className="w-full text-xs font-mono border-collapse min-w-[700px] border border-border">
+                      <thead className="sticky top-0 bg-card z-10">
+                        <tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <th className="px-3 py-2 font-medium w-8 border border-border">#</th>
+                          <th className="px-3 py-2 font-medium w-16 border border-border">Method</th>
+                          <th className="px-3 py-2 font-medium w-14 border border-border">Status</th>
+                          <th className="px-3 py-2 font-medium border border-border">URL</th>
+                          <th className="px-3 py-2 font-medium w-24 border border-border">Domain</th>
+                          <th className="px-3 py-2 font-medium w-16 text-right border border-border">Time</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredEvents.map((event, i) => {
+                          let domain = '';
+                          try { domain = event.url ? new URL(event.url).hostname : ''; } catch { domain = ''; }
+                          const urlPath = (() => { try { return event.url ? new URL(event.url).pathname + new URL(event.url).search : event.url || ''; } catch { return event.url || ''; } })();
+                          return (
+                            <tr
+                              key={event.id || i}
+                              onClick={() => setSelectedLog(event)}
+                              className={`border-b border-border cursor-pointer transition-colors ${
+                                selectedLog?.id === event.id ? 'bg-accent' : 'hover:bg-accent/50'
+                              } ${event.status && event.status >= 400 ? 'text-destructive' : ''}`}
+                            >
+                              <td className="px-3 py-2 text-muted-foreground border border-border">{i + 1}</td>
+                              <td className="px-3 py-2 border border-border">
+                                <span className={`font-bold ${
+                                  event.method === 'GET' ? 'text-blue-400' :
+                                  event.method === 'POST' ? 'text-green-400' :
+                                  event.method === 'PUT' ? 'text-amber-400' :
+                                  event.method === 'DELETE' ? 'text-red-400' : 'text-orange-400'
+                                }`}>{event.method}</span>
+                              </td>
+                              <td className="px-3 py-2 border border-border">
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                                  event.status && event.status >= 400 ? 'bg-destructive/20 text-destructive' :
+                                  event.status && event.status >= 300 ? 'bg-amber-500/20 text-amber-500' :
+                                  'bg-emerald-500/10 text-emerald-500'
+                                }`}>
+                                  {event.status || 'PENDING'}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 truncate max-w-[200px] border border-border" title={event.url || ''}>
+                                {urlPath}
+                              </td>
+                              <td className="px-3 py-2 text-muted-foreground truncate max-w-[100px] border border-border" title={domain}>
+                                {domain}
+                              </td>
+                              <td className="px-3 py-2 text-right text-muted-foreground tabular-nums border border-border">
+                                {event.duration ? `${Math.round(event.duration)}ms` : '—'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                     {filteredEvents.length === 0 && (
                       <div className="p-8 text-center text-muted-foreground text-sm">
-                        No logs match your filters.
+                        No requests match your filters.
                       </div>
                     )}
                   </div>
-                </ScrollArea>
+                )}
+
+                {/* Console & Actions tabs — list layout */}
+                {activeTab !== 'request' && (
+                  <div className="flex-1 overflow-auto">
+                    <div className="divide-y divide-border w-[700px]">
+                      {filteredEvents.map((event, i) => (
+                        <div
+                          key={event.id || i}
+                          onClick={() => setSelectedLog(event)}
+                          className={`px-4 py-2.5 flex items-start gap-3 text-sm cursor-pointer hover:bg-accent/50 transition-colors ${
+                            selectedLog?.id === event.id ? 'bg-accent border-l-2 border-l-primary pl-[14px]' : 'pl-4'
+                          }`}
+                        >
+                          <div className="text-muted-foreground shrink-0 pt-0.5 text-[10px] font-mono tabular-nums">
+                            {event.timestamp}
+                          </div>
+                          <div className="mt-0.5 shrink-0">
+                            {getLogIcon(event.type, event.level, event.status)}
+                          </div>
+                          <div className="flex-1 min-w-0 pt-0.5 overflow-hidden">
+                            {event.type === 'console' && (
+                              <div className={`text-xs whitespace-nowrap ${
+                                event.level === 'error' ? 'text-destructive' :
+                                event.level === 'warn' ? 'text-orange-400' : 'text-foreground'
+                              }`}>
+                                {event.message}
+                              </div>
+                            )}
+                            {event.type === 'click' && (
+                              <div className="space-y-0.5">
+                                <div className="flex items-center gap-2 whitespace-nowrap">
+                                  <span className="text-primary font-medium text-xs">click</span>
+                                  {event.targetText && (
+                                    <span className="text-foreground text-xs">"{event.targetText}"</span>
+                                  )}
+                                </div>
+                                <code className="text-muted-foreground text-[10px] block whitespace-nowrap">{event.selector || event.message}</code>
+                              </div>
+                            )}
+                            {event.type === 'input' && (
+                              <div className="space-y-0.5">
+                                <div className="flex items-center gap-2 whitespace-nowrap">
+                                  <span className="text-emerald-500 font-medium text-xs">input</span>
+                                  <span className="text-emerald-400 text-xs">= {event.value ?? ''}</span>
+                                </div>
+                                <code className="text-muted-foreground text-[10px] block whitespace-nowrap">{event.selector}</code>
+                              </div>
+                            )}
+                            {event.type === 'select' && (
+                              <div className="space-y-0.5">
+                                <div className="flex items-center gap-2 whitespace-nowrap">
+                                  <span className="text-amber-500 font-medium text-xs">select</span>
+                                  <span className="text-amber-400 text-xs">→ {event.value ?? ''}</span>
+                                </div>
+                                <code className="text-muted-foreground text-[10px] block whitespace-nowrap">{event.selector}</code>
+                              </div>
+                            )}
+                            {event.type === 'submit' && (
+                              <div className="space-y-0.5">
+                                <span className="text-rose-500 font-medium text-xs">submit</span>
+                                <code className="text-muted-foreground text-[10px] block whitespace-nowrap">{event.selector}</code>
+                              </div>
+                            )}
+                            {event.type === 'navigation' && (
+                              <div className="flex items-center gap-2 whitespace-nowrap">
+                                <span className="text-sky-500 font-medium text-xs shrink-0">navigate</span>
+                                <span className="text-sky-400 text-xs">{event.url}</span>
+                              </div>
+                            )}
+                          </div>
+                          {event.duration && (
+                            <div className="text-muted-foreground text-[10px] font-mono shrink-0 pt-0.5 tabular-nums">
+                              {Math.round(event.duration)}ms
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                      {filteredEvents.length === 0 && (
+                        <div className="p-8 text-center text-muted-foreground text-sm">
+                          No logs match your filters.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -769,7 +837,7 @@ export default function RecordingViewer() {
           aria-hidden="true"
         />
         <div
-          className={`fixed right-0 top-0 h-full w-full md:w-[500px] lg:w-[580px] bg-card border-l border-border z-50 shadow-2xl flex flex-col transition-transform duration-200 ease-out ${
+          className={`fixed right-0 top-0 h-full w-full md:w-[600px] lg:w-[700px] bg-card border-l border-border z-50 shadow-2xl flex flex-col transition-transform duration-200 ease-out ${
             detailOpen && selectedLog ? "translate-x-0" : "translate-x-full"
           }`}
           role="complementary"
@@ -781,7 +849,7 @@ export default function RecordingViewer() {
                 <div className="flex items-center gap-2 mb-2">
                   {getLogIcon(selectedLog.type, selectedLog.level, selectedLog.status)}
                   <h3 className="font-bold capitalize">{selectedLog.type} Details</h3>
-                  <Badge variant="outline" className="font-mono text-xs">{selectedLog.timestamp}ms</Badge>
+                  {selectedLog.duration && <Badge variant="outline" className="font-mono text-xs">{Math.round(selectedLog.duration)}ms</Badge>}
                   <Button
                     variant="ghost"
                     size="icon"
@@ -800,8 +868,8 @@ export default function RecordingViewer() {
                 )}
               </div>
               
-              <ScrollArea className="flex-1 p-4">
-                <div className="space-y-6">
+              <ScrollArea className="flex-1">
+                <div className="space-y-6 p-4">
                   {/* Network specific details */}
                   {selectedLog.type === 'request' && (
                     <>
@@ -820,8 +888,11 @@ export default function RecordingViewer() {
 
                       {selectedLog.requestHeaders && Object.keys(selectedLog.requestHeaders).length > 0 && (
                         <div>
-                          <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">Request Headers</p>
-                          <div className="bg-muted/50 rounded-md p-3 font-mono text-[11px] leading-relaxed overflow-x-auto whitespace-pre">
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Request Headers</p>
+                            <CopyButton text={Object.entries(selectedLog.requestHeaders!).map(([k, v]) => `${k}: ${String(v)}`).join('\n')} title="Copy all request headers" />
+                          </div>
+                          <div className="bg-muted/50 rounded-md p-3 font-mono text-[11px] leading-relaxed break-all whitespace-pre-wrap">
                             {Object.entries(selectedLog.requestHeaders).map(([k, v]) => (
                               <div key={k}><span className="text-blue-400">{k}:</span> {String(v)}</div>
                             ))}
@@ -831,8 +902,11 @@ export default function RecordingViewer() {
 
                       {selectedLog.responseHeaders && Object.keys(selectedLog.responseHeaders).length > 0 && (
                         <div>
-                          <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">Response Headers</p>
-                          <div className="bg-muted/50 rounded-md p-3 font-mono text-[11px] leading-relaxed overflow-x-auto whitespace-pre">
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Response Headers</p>
+                            <CopyButton text={Object.entries(selectedLog.responseHeaders!).map(([k, v]) => `${k}: ${String(v)}`).join('\n')} title="Copy all response headers" />
+                          </div>
+                          <div className="bg-muted/50 rounded-md p-3 font-mono text-[11px] leading-relaxed break-all whitespace-pre-wrap">
                             {Object.entries(selectedLog.responseHeaders).map(([k, v]) => (
                               <div key={k}><span className="text-blue-400">{k}:</span> {String(v)}</div>
                             ))}
@@ -862,7 +936,7 @@ export default function RecordingViewer() {
                       {selectedLog.error && (
                         <div className="mt-4">
                           <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">Stack Trace</p>
-                          <div className="bg-background border border-destructive/30 rounded-md p-3 font-mono text-[11px] text-destructive overflow-x-auto whitespace-pre">
+                          <div className="bg-background border border-destructive/30 rounded-md p-3 font-mono text-[11px] text-destructive whitespace-pre-wrap break-all">
                             {selectedLog.error}
                           </div>
                         </div>
@@ -1010,9 +1084,7 @@ export default function RecordingViewer() {
                 className="font-mono text-sm bg-muted"
               />
             </div>
-            <Button type="button" size="sm" className="px-3" onClick={copyToClipboard}>
-              Copy
-            </Button>
+            <CopyButton text={shareUrl} title="Copy link" size={16} />
           </div>
         </DialogContent>
       </Dialog>

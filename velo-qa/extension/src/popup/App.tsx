@@ -218,7 +218,7 @@ function Ready({
   const [ui, setUi] = useState<UiState>({ kind: 'idle' });
   const [tick, setTick] = useState(0);
   const [copied, setCopied] = useState(false);
-  const [withMic, setWithMic] = useState(true);
+  const [withMic, setWithMic] = useState(false);
   const tickRef = useRef<number | null>(null);
 
   const startTicker = useCallback(() => {
@@ -402,112 +402,105 @@ function Ready({
 
   return (
     <div className="app">
-      <div className="brand">Velo<span>QA</span></div>
-      <div className="stack">
-        <div>
-          <label>Workspace</label>
-          <select
-            value={auth.activeWorkspaceId}
-            onChange={(e) => void changeWorkspace(e.target.value)}
-            disabled={recording || busy}
-          >
-            {auth.workspaces.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name}
-              </option>
-            ))}
-          </select>
+      {/* Header */}
+      <div className="header">
+        <div className="brand">
+          <img src={chrome.runtime.getURL('icons/logo.svg')} alt="VeloCap" className="brand-logo" />
+          <span className="brand-name">VeloCap</span>
         </div>
+        <span className="user-email">{auth.user.email}</span>
+      </div>
 
+      {/* Workspace selector */}
+      <div>
+        <div className="workspace-label">Workspace</div>
+        <select
+          value={auth.activeWorkspaceId}
+          onChange={(e) => void changeWorkspace(e.target.value)}
+          disabled={recording || busy}
+        >
+          {auth.workspaces.map((w) => (
+            <option key={w.id} value={w.id}>
+              {w.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="stack">
         {!recording && (
           <>
-            <button className="primary" disabled={busy} onClick={() => void screenshot()}>
+            <button className="action-btn" disabled={busy} onClick={() => void screenshot()}>
               {ui.kind === 'screenshotting' ? (
-                <span className="row" style={{ justifyContent: 'center', gap: 6 }}>
+                <>
                   <span className="spinner" /> Capturing…
-                </span>
+                </>
               ) : (
-                'Capture screenshot'
+                <><svg className="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="13" r="3"/><path d="M12 7h.01"/></svg> Screenshot</>
               )}
             </button>
             <button
-              className="primary"
+              className="action-btn"
               disabled={busy}
               onClick={() => void startRecord('tab')}
-              title="Fast path — records this tab. No OS picker needed."
             >
-              ● Record this tab {withMic ? '+ mic' : '(silent)'}
+              <svg className="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg> Record Tab
             </button>
-            <label
-              className="row tiny muted"
-              style={{ gap: 6, padding: '0 2px', cursor: 'pointer' }}
+            <button
+              className="action-btn"
+              disabled={busy}
+              onClick={() => void startRecord('screen')}
             >
+              <svg className="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg> Record Screen
+            </button>
+            <label className="mic-toggle">
               <input
                 type="checkbox"
                 checked={withMic}
                 onChange={(e) => setWithMic(e.target.checked)}
-                style={{ width: 'auto' }}
               />
               Include microphone
             </label>
-            <button
-              className="ghost"
-              disabled={busy}
-              onClick={() => void startRecord('screen')}
-              title="Full OS picker — any screen, window, or tab. Needs Screen Recording permission on macOS."
-            >
-              ● Record full screen…
-            </button>
           </>
         )}
 
         {recording && (
           <>
-            <div className="row" style={{ justifyContent: 'center', gap: 8 }}>
-              <span
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  background: 'var(--accent)',
-                  animation: 'pulse 1s infinite',
-                }}
-              />
-              <span>
-                Recording {ui.kind === 'recording' ? `(${ui.mode})` : ''} · {fmtDuration(elapsed)}
-              </span>
+            <div className="recording-indicator">
+              <span className="recording-dot" />
+              Recording {ui.kind === 'recording' ? `(${ui.mode})` : ''} · {fmtDuration(elapsed)}
             </div>
-            <button className="primary" onClick={() => void stopRecord()}>
-              Stop & upload
+            <button className="danger" onClick={() => void stopRecord()}>
+              ⏹ Stop Recording
             </button>
           </>
         )}
 
         {ui.kind === 'processing' && (
-          <div className="muted row" style={{ justifyContent: 'center', gap: 6 }}>
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, padding: 12, color: 'var(--muted)' }}>
             <span className="spinner" /> Uploading…
           </div>
         )}
 
         {ui.kind === 'result' && ui.ok && ui.url && (
           <>
-            <div className="success">✓ Recording saved</div>
-            {ui.note && <div className="tiny muted">{ui.note}</div>}
+            <div className="success-box">✓ Recording saved</div>
+            {ui.note && <div className="note">{ui.note}</div>}
             <a className="link" href={ui.url} target="_blank" rel="noreferrer">
               {ui.url}
             </a>
-            <div className="row" style={{ gap: 6 }}>
-              <button className="ghost tiny" onClick={() => void copyLink(ui.url!)}>
-                {copied ? 'Copied!' : 'Copy link'}
+            <div className="row" style={{ gap: 6, justifyContent: 'center' }}>
+              <button className="ghost" onClick={() => void copyLink(ui.url!)}>
+                {copied ? '✓ Copied!' : '📋 Copy link'}
               </button>
               <button
-                className="ghost tiny"
+                className="ghost"
                 onClick={() => chrome.tabs.create({ url: ui.url! })}
               >
-                Open
+                🔗 Open
               </button>
-              <button className="ghost tiny" onClick={() => setUi({ kind: 'idle' })}>
-                New capture
+              <button className="ghost" onClick={() => setUi({ kind: 'idle' })}>
+                ＋ New
               </button>
             </div>
           </>
@@ -515,11 +508,12 @@ function Ready({
 
         {ui.kind === 'result' && !ui.ok && (
           <>
-            <div className="error">{ui.error}</div>
-            <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+            <div className="error-box">{ui.error}</div>
+            <div className="row" style={{ gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
               {ui.needsScreenSetup && (
                 <button
-                  className="primary tiny"
+                  className="primary"
+                  style={{ fontSize: 12, padding: '8px 12px' }}
                   onClick={() =>
                     chrome.tabs.create({
                       url: chrome.runtime.getURL('src/permissions/screen.html'),
@@ -531,7 +525,8 @@ function Ready({
               )}
               {ui.needsMicSetup && (
                 <button
-                  className="primary tiny"
+                  className="primary"
+                  style={{ fontSize: 12, padding: '8px 12px' }}
                   onClick={() =>
                     chrome.tabs.create({
                       url: chrome.runtime.getURL('src/permissions/index.html'),
@@ -541,12 +536,12 @@ function Ready({
                   Fix mic permission
                 </button>
               )}
-              <button className="ghost tiny" onClick={() => setUi({ kind: 'idle' })}>
+              <button className="ghost" onClick={() => setUi({ kind: 'idle' })}>
                 Try again
               </button>
               {ui.needsMicSetup && (
                 <button
-                  className="ghost tiny"
+                  className="ghost"
                   onClick={() => {
                     setWithMic(false);
                     setUi({ kind: 'idle' });
@@ -559,17 +554,7 @@ function Ready({
           </>
         )}
       </div>
-      <div className="divider" />
-      <div className="footer">
-        <span className="tiny muted">{auth.user.email}</span>
-        <button
-          className="ghost tiny"
-          onClick={() => void onSignOut()}
-          disabled={recording || busy}
-        >
-          Sign out
-        </button>
-      </div>
+
     </div>
   );
 }

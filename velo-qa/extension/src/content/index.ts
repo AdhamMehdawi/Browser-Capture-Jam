@@ -6,7 +6,7 @@
 import type { ActionEntry, CapturePayload, ConsoleEntry, DeviceInfo, NetworkEntry } from '../types.js';
 import { MSG } from '../types.js';
 
-const HOOK_TAG = 'veloqa/hook';
+const HOOK_TAG = 'velocap/hook';
 const CONSOLE_MAX = 500;
 const NETWORK_MAX = 300;
 const ACTIONS_MAX = 500;
@@ -21,7 +21,7 @@ const actionsBuffer: ActionEntry[] = [];
 
 // eslint-disable-next-line no-console
 console.info(
-  '%c[Velo QA] content script ready',
+  '%c[VeloCap] content script ready',
   'color:#ff4d7e;font-weight:bold',
 );
 
@@ -33,7 +33,7 @@ window.addEventListener('message', (event) => {
 
   // Debug: log received events
   // eslint-disable-next-line no-console
-  console.debug('[veloqa/content] received hook event', data.kind, data.payload);
+  console.debug('[velocap/content] received hook event', data.kind, data.payload);
 
   if (data.kind === 'console' || data.kind === 'error' || data.kind === 'unhandledrejection') {
     const entry = data.payload as ConsoleEntry;
@@ -99,7 +99,7 @@ void masked;
 
 function collectPayload(): CapturePayload {
   // eslint-disable-next-line no-console
-  console.log('[veloqa/content] collectPayload called', {
+  console.log('[velocap/content] collectPayload called', {
     consoleCount: consoleBuffer.length,
     networkCount: networkBuffer.length,
     actionsCount: actionsBuffer.length,
@@ -140,7 +140,7 @@ function showOverlay(startedAt: number): void {
   overlayStartedAt = startedAt || Date.now();
 
   overlayHost = document.createElement('div');
-  overlayHost.setAttribute('data-veloqa-overlay', '');
+  overlayHost.setAttribute('data-velocap-overlay', '');
   overlayHost.style.cssText =
     'all: initial; position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 2147483647; pointer-events: auto;';
 
@@ -150,35 +150,35 @@ function showOverlay(startedAt: number): void {
       :host { all: initial; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
       .bar {
         display: inline-flex; align-items: center; gap: 10px;
-        padding: 8px 12px;
-        background: #09090b; color: #fafafa;
-        border: 1px solid #27272a; border-radius: 999px;
+        padding: 8px 14px;
+        background: #ffffff; color: #1a1a2e;
+        border: 1px solid #e5e7eb; border-radius: 999px;
         font: 13px/1.3 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        box-shadow: 0 6px 24px rgba(0,0,0,0.35);
+        box-shadow: 0 4px 16px rgba(0,0,0,0.10), 0 1px 3px rgba(0,0,0,0.06);
         user-select: none;
       }
-      .brand { font-weight: 700; letter-spacing: .2px; }
-      .brand b { color: #7c3aed; }
+      .logo { height: 18px; width: auto; flex-shrink: 0; }
       .dot {
         width: 8px; height: 8px; border-radius: 50%;
         background: #ef4444;
         animation: pulse 1s infinite ease-in-out;
       }
-      .timer { font-variant-numeric: tabular-nums; color: #a1a1aa; min-width: 34px; text-align: center; }
+      .timer { font-variant-numeric: tabular-nums; color: #6b7280; min-width: 34px; text-align: center; font-weight: 500; }
       button {
         background: #7c3aed; color: #ffffff; border: 0; border-radius: 6px;
-        padding: 6px 12px; font: inherit; font-weight: 600; cursor: pointer;
+        padding: 6px 14px; font: inherit; font-weight: 600; cursor: pointer;
+        transition: background 0.15s;
       }
-      button:disabled { background: #27272a; color: #a1a1aa; cursor: default; }
-      button:hover:not(:disabled) { filter: brightness(1.08); }
+      button:disabled { background: #e5e7eb; color: #9ca3af; cursor: default; }
+      button:hover:not(:disabled) { background: #6d28d9; }
       @keyframes pulse {
         0%, 100% { opacity: 1; transform: scale(1); }
         50%      { opacity: 0.4; transform: scale(1.5); }
       }
     </style>
     <div class="bar" role="status" aria-live="polite">
+      <svg class="logo" xmlns="http://www.w3.org/2000/svg" viewBox="350 90 300 250"><path fill="#7c3aed" d="M546.778381,143.170624C571.837769,159.376846 596.645569,175.305298 621.322937,191.433304C636.009155,201.031509 635.978516,216.712524 621.371460,226.194397C576.110229,255.574753 530.847717,284.953583 485.503937,314.206238C472.276642,322.739563 459.865479,318.754028 453.794159,304.396240C425.790985,238.172882 397.800232,171.944290 369.830170,105.706955C369.077332,103.924194 367.954132,102.184967 368.359497,99.792320C371.491486,98.422760 374.856354,99.127960 378.098694,99.068153C385.426880,98.932976 392.763336,99.161888 400.087982,98.950737C403.767334,98.844666 405.815216,100.090027 407.237396,103.618439C417.878113,130.018570 428.701080,156.345245 439.462555,182.696701C444.289581,194.516510 449.106537,206.340408 454.767395,218.077042C454.767395,210.186707 454.769012,202.296356 454.767090,194.406006C454.761017,169.581909 454.815948,144.757568 454.710480,119.933884C454.677002,112.059120 456.822998,105.459862 464.040466,101.364922C471.543579,97.107903 478.433380,99.167374 485.133606,103.492462C505.562927,116.679909 526.023499,129.818924 546.778381,143.170624M487.077606,177.500229C487.088318,196.659058 487.097656,215.817871 487.110474,234.976700C487.115601,242.640198 486.990417,250.307053 487.176819,257.966248C487.361481,265.554352 493.136444,268.822632 499.920197,265.331207C501.841492,264.342316 503.688873,263.195923 505.509277,262.026917C523.025391,250.778488 540.529297,239.510925 558.034729,228.245773C561.167725,226.229553 564.291687,224.199097 568.479797,221.489456C565.252991,238.021347 557.077332,250.810303 549.042114,263.705475C555.025513,258.754944 560.207947,253.170654 564.589417,246.857254C574.476318,232.610870 581.915833,217.562714 579.724915,199.476318C578.750366,191.431412 575.671753,184.236603 570.779297,177.840118C572.674500,186.055344 575.610046,194.033020 574.522217,203.760239C570.794800,199.851517 568.074524,196.773041 564.520142,194.506149C556.095520,189.133087 547.900330,183.401398 539.506714,177.978363C526.497131,169.573074 513.505432,161.131058 500.296631,153.047012C493.184265,148.694077 487.352753,152.185699 487.141632,160.507706C487.006470,165.835632 487.099609,171.169327 487.077606,177.500229z"/><path fill="#ef4444" d="M516.001099,189.525391C527.921936,187.016037 537.708862,192.994354 540.377869,204.043137C543.029785,215.020767 537.080444,225.186371 526.369263,227.979706C515.840759,230.725403 505.525635,224.949127 502.393585,214.553787C499.126343,203.709702 504.189117,194.169617 516.001099,189.525391z"/></svg>
       <span class="dot" aria-hidden="true"></span>
-      <span class="brand">Velo<b>QA</b></span>
       <span class="timer" id="oj-timer">0:00</span>
       <button id="oj-stop">Stop</button>
     </div>
@@ -190,7 +190,7 @@ function showOverlay(startedAt: number): void {
   overlayStopBtn.addEventListener('click', () => {
     if (!overlayStopBtn) return;
     overlayStopBtn.disabled = true;
-    overlayStopBtn.textContent = 'Uploading…';
+    overlayStopBtn.textContent = 'Stopping…';
     void chrome.runtime.sendMessage({ kind: 'bg:record-stop' });
   });
 
@@ -256,7 +256,7 @@ function showPreview(_msg: {
   const previewUrl = chrome.runtime.getURL('src/preview/index.html') + '?embed=1';
 
   previewHost = document.createElement('div');
-  previewHost.setAttribute('data-veloqa-preview', '');
+  previewHost.setAttribute('data-velocap-preview', '');
   previewHost.style.cssText =
     'all: initial; position: fixed; inset: 0; z-index: 2147483647;';
 
@@ -289,7 +289,7 @@ function showPreview(_msg: {
         <iframe
           src="${previewUrl}"
           allow="autoplay; clipboard-write"
-          title="Velo QA preview"
+          title="VeloCap preview"
         ></iframe>
       </div>
     </div>
@@ -301,7 +301,7 @@ function showPreview(_msg: {
   // completion. We only listen for our own tagged messages from that frame.
   previewMessageHandler = (ev: MessageEvent): void => {
     const data = ev.data as { tag?: string; action?: string } | null;
-    if (!data || data.tag !== 'veloqa/preview') return;
+    if (!data || data.tag !== 'velocap/preview') return;
     if (data.action === 'close') hidePreview();
   };
   window.addEventListener('message', previewMessageHandler);

@@ -384,7 +384,7 @@ function Ready({
   async function changeWorkspace(id: string) {
     const next = { ...auth, activeWorkspaceId: id };
     onUpdate(next);
-    await chrome.storage.local.set({ 'veloqa.auth': next });
+    await chrome.storage.local.set({ 'velocap.auth': next });
   }
 
   async function copyLink(url: string) {

@@ -1,7 +1,7 @@
 // Content script that runs on the dashboard to pick up auth tokens
 // This script checks for auth tokens stored by the extension-auth page
 
-const AUTH_KEY = 'veloqa_extension_auth';
+const AUTH_KEY = 'velocap_extension_auth';
 
 function checkForAuthToken() {
   const stored = localStorage.getItem(AUTH_KEY);
@@ -15,7 +15,7 @@ function checkForAuthToken() {
       return;
     }
 
-    console.log('[veloqa/auth-callback] Found auth token, sending to background');
+    console.log('[velocap/auth-callback] Found auth token, sending to background');
 
     // Send to background script
     chrome.runtime.sendMessage({
@@ -23,15 +23,15 @@ function checkForAuthToken() {
       token: data.token,
     }, (response) => {
       if (response?.ok) {
-        console.log('[veloqa/auth-callback] Auth stored successfully');
+        console.log('[velocap/auth-callback] Auth stored successfully');
         // Clear the token from localStorage
         localStorage.removeItem(AUTH_KEY);
       } else {
-        console.error('[veloqa/auth-callback] Failed to store auth:', response?.error);
+        console.error('[velocap/auth-callback] Failed to store auth:', response?.error);
       }
     });
   } catch (e) {
-    console.error('[veloqa/auth-callback] Failed to parse auth token:', e);
+    console.error('[velocap/auth-callback] Failed to parse auth token:', e);
   }
 }
 

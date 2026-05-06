@@ -16,6 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import { toast } from "sonner";
 import { NetworkLogEntry, getGetRecordingQueryKey } from "@workspace/api-client-react";
 
@@ -127,6 +128,7 @@ function FixedVideoPlayer({
   const createdBlobUrl = useRef<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const plyrRef = useRef<{ destroy(): void } | null>(null);
+  const knownSec = knownDurationMs ? knownDurationMs / 1000 : 0;
 
   // Fetch and patch WebM duration
   useEffect(() => {
@@ -197,6 +199,8 @@ function FixedVideoPlayer({
         keyboard: { focused: true, global: false },
         tooltips: { controls: true, seek: true },
         seekTime: 5,
+        // Use the known duration so the UI shows the correct total immediately
+        ...(knownSec > 0 ? { duration: knownSec } : {}),
       });
       plyrRef.current = player;
     });
@@ -207,7 +211,25 @@ function FixedVideoPlayer({
         plyrRef.current = null;
       }
     };
-  }, [src]);
+  }, [src, knownSec]);
+
+  // Force-fix duration: if the browser reports a wrong/short duration,
+  // seek to end to force Chrome to discover the real length.
+  const fixDuration = (v: HTMLVideoElement) => {
+    const reported = v.duration;
+    if (
+      !Number.isFinite(reported) ||
+      Number.isNaN(reported) ||
+      (knownSec > 0 && reported < knownSec * 0.8)
+    ) {
+      const onSeeked = () => {
+        v.removeEventListener('seeked', onSeeked);
+        v.currentTime = 0;
+      };
+      v.addEventListener('seeked', onSeeked);
+      v.currentTime = 1e101;
+    }
+  };
 
   return (
     <div className="bg-black relative w-full h-full plyr-container">
@@ -217,17 +239,7 @@ function FixedVideoPlayer({
           src={src}
           className="w-full h-full"
           preload="metadata"
-          onLoadedMetadata={(e) => {
-            const v = e.currentTarget;
-            if (v.duration === Infinity || Number.isNaN(v.duration)) {
-              const onSeeked = () => {
-                v.removeEventListener('seeked', onSeeked);
-                v.currentTime = 0;
-              };
-              v.addEventListener('seeked', onSeeked);
-              v.currentTime = 1e101;
-            }
-          }}
+          onLoadedMetadata={(e) => fixDuration(e.currentTarget)}
         />
       ) : error ? (
         <div className="text-destructive text-sm p-6 text-center">
@@ -508,28 +520,34 @@ export default function RecordingViewer() {
       </header>
 
       {/* Main Content - Video on left, Logs on right */}
-      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+      <ResizablePanelGroup direction="horizontal" className="flex-1 overflow-hidden">
         {/* Left Column - Video (takes most of the screen) */}
         {(videoUrl || screenshotUrl) && (
-          <div className="flex-1 flex flex-col border-r border-border bg-muted/30 min-w-0 overflow-auto">
-            <div className="flex items-start justify-center p-4 pt-6">
-              <div className="w-full max-w-6xl">
+          <>
+          <ResizablePanel defaultSize={65} minSize={30}>
+            <div className="h-full flex flex-col bg-muted/30 overflow-auto">
+              <div className="flex items-start justify-center p-4 pt-6">
                 {videoUrl ? (
-                  <div className="rounded-lg overflow-hidden shadow-lg bg-black aspect-video">
-                    <FixedVideoPlayer videoUrl={videoUrl} knownDurationMs={recording.duration} />
+                  <div className="w-full max-w-5xl">
+                    <div className="rounded-lg shadow-lg bg-black">
+                      <FixedVideoPlayer videoUrl={videoUrl} knownDurationMs={recording.duration} />
+                    </div>
                   </div>
                 ) : screenshotUrl ? (
-                  <div className="rounded-lg overflow-hidden shadow-lg bg-black">
-                    <img src={screenshotUrl} alt={recording.title} className="w-full h-auto" />
+                  <div className="w-full">
+                    <img src={screenshotUrl} alt={recording.title} className="w-full h-auto block" />
                   </div>
                 ) : null}
               </div>
             </div>
-          </div>
+          </ResizablePanel>
+          <ResizableHandle withHandle />
+          </>
         )}
 
         {/* Right Column - Info & Logs Sidebar */}
-        <div className={`md:w-[380px] lg:w-[420px] shrink-0 flex flex-col ${!videoUrl && !screenshotUrl ? 'flex-1 w-full' : ''}`}>
+        <ResizablePanel defaultSize={35} minSize={20} maxSize={60}>
+        <div className="h-full flex flex-col">
           {/* Tabs */}
           <div className="border-b border-border bg-card shrink-0 overflow-x-auto">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -826,6 +844,8 @@ export default function RecordingViewer() {
             )}
           </div>
         </div>
+        </ResizablePanel>
+      </ResizablePanelGroup>
 
         {/* Right-side detail drawer — hidden by default, slides in when an
             event is selected. Click-backdrop / X / Esc to close. */}
@@ -1066,7 +1086,6 @@ export default function RecordingViewer() {
             </div>
           ) : null}
         </div>
-      </div>
 
       <Dialog open={shareModalOpen} onOpenChange={setShareModalOpen}>
         <DialogContent className="sm:max-w-md">

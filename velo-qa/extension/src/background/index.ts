@@ -63,7 +63,7 @@ let lastError: { code: string; message: string; at: number } | null = null;
 let overlayTabId: number | null = null;
 
 // Storage key for persisting pending preview data (survives service worker restarts)
-const PENDING_PREVIEW_STORAGE_KEY = 'veloqa.pendingPreview';
+const PENDING_PREVIEW_STORAGE_KEY = 'velocap.pendingPreview';
 
 /** Persist pending-preview state to chrome.storage.local */
 async function persistPendingPreview(): Promise<void> {
@@ -81,7 +81,7 @@ async function persistPendingPreview(): Promise<void> {
     savedAt: Date.now(),
   };
   await chrome.storage.local.set({ [PENDING_PREVIEW_STORAGE_KEY]: data });
-  console.log('[veloqa/bg] persisted pending preview to storage');
+  console.log('[velocap/bg] persisted pending preview to storage');
 }
 
 /** Restore pending-preview state from chrome.storage.local */
@@ -89,12 +89,12 @@ async function restorePendingPreview(): Promise<boolean> {
   const result = await chrome.storage.local.get(PENDING_PREVIEW_STORAGE_KEY);
   const data = result[PENDING_PREVIEW_STORAGE_KEY];
   if (!data || !data.dataUrl) {
-    console.log('[veloqa/bg] no pending preview in storage to restore');
+    console.log('[velocap/bg] no pending preview in storage to restore');
     return false;
   }
   // Check if it's too old (more than 10 minutes)
   if (Date.now() - data.savedAt > 10 * 60 * 1000) {
-    console.log('[veloqa/bg] pending preview in storage is too old, clearing');
+    console.log('[velocap/bg] pending preview in storage is too old, clearing');
     await chrome.storage.local.remove(PENDING_PREVIEW_STORAGE_KEY);
     return false;
   }
@@ -110,7 +110,7 @@ async function restorePendingPreview(): Promise<boolean> {
     thumbnailDataUrl: data.thumbnailDataUrl ?? null,
     mediaType: data.mediaType ?? 'video',
   };
-  console.log('[veloqa/bg] restored pending preview from storage', {
+  console.log('[velocap/bg] restored pending preview from storage', {
     dataUrlLength: data.dataUrl.length,
     durationMs: data.durationMs,
   });
@@ -120,7 +120,7 @@ async function restorePendingPreview(): Promise<boolean> {
 /** Clear persisted pending preview from storage */
 async function clearPersistedPreview(): Promise<void> {
   await chrome.storage.local.remove(PENDING_PREVIEW_STORAGE_KEY);
-  console.log('[veloqa/bg] cleared persisted pending preview');
+  console.log('[velocap/bg] cleared persisted pending preview');
 }
 
 // Restore state on service worker startup
@@ -143,7 +143,7 @@ async function showOverlayOn(tabId: number, startedAt: number): Promise<void> {
       await chrome.tabs.sendMessage(tabId, { kind: 'overlay:show', startedAt });
       overlayTabId = tabId;
     } catch (e) {
-      console.warn('[veloqa/bg] overlay inject failed', e);
+      console.warn('[velocap/bg] overlay inject failed', e);
     }
   }
 }
@@ -160,7 +160,7 @@ async function hideOverlayIfAny(): Promise<void> {
 
 function setError(code: string, message: string): void {
   lastError = { code, message, at: Date.now() };
-  console.error('[veloqa/bg]', code, message);
+  console.error('[velocap/bg]', code, message);
 }
 function clearError(): void {
   lastError = null;
@@ -277,10 +277,10 @@ async function ensureOffscreen(): Promise<void> {
     documentUrls: [OFFSCREEN_URL],
   });
 
-  console.log('[veloqa/bg] existing offscreen contexts:', existing.length);
+  console.log('[velocap/bg] existing offscreen contexts:', existing.length);
 
   if (!existing.length) {
-    console.log('[veloqa/bg] creating offscreen', OFFSCREEN_URL);
+    console.log('[velocap/bg] creating offscreen', OFFSCREEN_URL);
     try {
       await chrome.offscreen.createDocument({
         url: OFFSCREEN_URL,
@@ -290,9 +290,9 @@ async function ensureOffscreen(): Promise<void> {
         ],
         justification: 'Record screen/tab with optional mic for a Jam',
       });
-      console.log('[veloqa/bg] offscreen document created successfully');
+      console.log('[velocap/bg] offscreen document created successfully');
     } catch (createErr) {
-      console.error('[veloqa/bg] failed to create offscreen:', createErr);
+      console.error('[velocap/bg] failed to create offscreen:', createErr);
       throw createErr;
     }
   }
@@ -301,7 +301,7 @@ async function ensureOffscreen(): Promise<void> {
   const afterCreate = await chrome.runtime.getContexts({
     contextTypes: ['OFFSCREEN_DOCUMENT' as chrome.runtime.ContextType],
   });
-  console.log('[veloqa/bg] offscreen contexts after create:', afterCreate.length, afterCreate.map(c => c.documentUrl));
+  console.log('[velocap/bg] offscreen contexts after create:', afterCreate.length, afterCreate.map(c => c.documentUrl));
 
   if (!afterCreate.length) {
     throw new Error('Offscreen document was not created');
@@ -318,7 +318,7 @@ async function ensureOffscreen(): Promise<void> {
         chrome.runtime.sendMessage({ target: 'offscreen', kind: 'ping' }, (resp) => {
           clearTimeout(timeout);
           if (chrome.runtime.lastError) {
-            console.log('[veloqa/bg] ping error:', chrome.runtime.lastError.message);
+            console.log('[velocap/bg] ping error:', chrome.runtime.lastError.message);
             resolve(undefined);
           } else {
             resolve(resp);
@@ -326,7 +326,7 @@ async function ensureOffscreen(): Promise<void> {
         });
       });
       if (response?.ok) {
-        console.log('[veloqa/bg] offscreen ready after', attempt + 1, 'pings');
+        console.log('[velocap/bg] offscreen ready after', attempt + 1, 'pings');
         return;
       }
     } catch (e) {
@@ -416,7 +416,7 @@ function getTabStreamId(tabId: number): Promise<string> {
 }
 
 async function handleRecordStart(req: RecordStartReq): Promise<BgResponse> {
-  console.log('[veloqa/bg] record-start', req);
+  console.log('[velocap/bg] record-start', req);
   clearError();
   try {
     if (state.kind !== 'idle') {
@@ -432,7 +432,7 @@ async function handleRecordStart(req: RecordStartReq): Promise<BgResponse> {
     if (!tab.id) return { ok: false, code: 'no_tab', message: 'No active tab' };
     const blocked = unsupported(tab);
     if (blocked) return blocked;
-    console.log('[veloqa/bg] target tab', { id: tab.id, url: tab.url });
+    console.log('[velocap/bg] target tab', { id: tab.id, url: tab.url });
 
     let startPayload: Record<string, unknown>;
     if (req.mode === 'tab') {
@@ -449,16 +449,16 @@ async function handleRecordStart(req: RecordStartReq): Promise<BgResponse> {
       startPayload = { source: 'display', captureAudio: req.withMic };
     }
 
-    console.log('[veloqa/bg] ensuring offscreen');
+    console.log('[velocap/bg] ensuring offscreen');
     await ensureOffscreen();
-    console.log('[veloqa/bg] sending start to offscreen', {
+    console.log('[velocap/bg] sending start to offscreen', {
       ...startPayload,
       mic: req.withMic,
     });
     // Use callback-based sendMessage for more reliable async response handling
     const started = await new Promise<{ ok: boolean; message?: string } | undefined>((resolve) => {
       const timeout = setTimeout(() => {
-        console.log('[veloqa/bg] start message timed out');
+        console.log('[velocap/bg] start message timed out');
         resolve(undefined);
       }, 10000); // 10 second timeout for user to grant permissions
       chrome.runtime.sendMessage(
@@ -471,7 +471,7 @@ async function handleRecordStart(req: RecordStartReq): Promise<BgResponse> {
         (response) => {
           clearTimeout(timeout);
           if (chrome.runtime.lastError) {
-            console.log('[veloqa/bg] start error:', chrome.runtime.lastError.message);
+            console.log('[velocap/bg] start error:', chrome.runtime.lastError.message);
             resolve({ ok: false, message: chrome.runtime.lastError.message ?? 'Unknown error' });
           } else {
             resolve(response);
@@ -479,7 +479,7 @@ async function handleRecordStart(req: RecordStartReq): Promise<BgResponse> {
         }
       );
     });
-    console.log('[veloqa/bg] offscreen started?', started);
+    console.log('[velocap/bg] offscreen started?', started);
     if (!started?.ok) {
       await closeOffscreen();
       let msg = started?.message ?? 'Recorder refused to start (offscreen did not respond)';
@@ -508,13 +508,13 @@ async function handleRecordStart(req: RecordStartReq): Promise<BgResponse> {
     try {
       const ctxResult = await requestContext(tab.id);
       startContext = ctxResult.payload;
-      console.log('[veloqa/bg] captured start context', {
+      console.log('[velocap/bg] captured start context', {
         consoleCount: startContext.console.length,
         networkCount: startContext.network.length,
         actionsCount: startContext.actions.length,
       });
     } catch (e) {
-      console.warn('[veloqa/bg] failed to capture start context', e);
+      console.warn('[velocap/bg] failed to capture start context', e);
     }
 
     state = {
@@ -526,7 +526,7 @@ async function handleRecordStart(req: RecordStartReq): Promise<BgResponse> {
       mode: req.mode,
       startContext,
     };
-    console.log('[veloqa/bg] state=recording');
+    console.log('[velocap/bg] state=recording');
     // Inject the floating recording bar on whatever tab the user was on —
     // for tab-mode that's the recorded tab itself; for full-screen it's just
     // a convenient place for the user to see the timer + stop button.
@@ -578,14 +578,14 @@ async function onRecordedFromOffscreen(msg: {
   bytes: number;
   note?: string;
 }): Promise<void> {
-  console.log('[veloqa/bg] recorded', {
+  console.log('[velocap/bg] recorded', {
     durationMs: msg.durationMs,
     bytes: msg.bytes,
     note: msg.note,
   });
   try {
     if (state.kind !== 'processing') {
-      console.warn('[veloqa/bg] recorded delivered in state', state.kind);
+      console.warn('[velocap/bg] recorded delivered in state', state.kind);
       resolveResult({ ok: false, code: 'unexpected_state', message: 'Recorder delivered out of band' });
       return;
     }
@@ -600,7 +600,7 @@ async function onRecordedFromOffscreen(msg: {
       try {
         const endCtxResult = await requestContext(tabId);
         const endContext = endCtxResult.payload;
-        console.log('[veloqa/bg] captured end context', {
+        console.log('[velocap/bg] captured end context', {
           consoleCount: endContext.console.length,
           networkCount: endContext.network.length,
           actionsCount: endContext.actions.length,
@@ -633,7 +633,7 @@ async function onRecordedFromOffscreen(msg: {
             device: endContext.device,
             page: endContext.page,
           };
-          console.log('[veloqa/bg] merged context', {
+          console.log('[velocap/bg] merged context', {
             consoleCount: capturedContext.console.length,
             networkCount: capturedContext.network.length,
             actionsCount: capturedContext.actions.length,
@@ -642,7 +642,7 @@ async function onRecordedFromOffscreen(msg: {
           capturedContext = endContext;
         }
       } catch (e) {
-        console.warn('[veloqa/bg] failed to capture end context', e);
+        console.warn('[velocap/bg] failed to capture end context', e);
         capturedContext = startContext;
       }
     } else {
@@ -661,9 +661,9 @@ async function onRecordedFromOffscreen(msg: {
             resolve(dataUrl);
           });
         });
-        console.log('[veloqa/bg] captured thumbnail', { length: thumbnailDataUrl.length });
+        console.log('[velocap/bg] captured thumbnail', { length: thumbnailDataUrl.length });
       } catch (e) {
-        console.warn('[veloqa/bg] thumbnail capture failed', e);
+        console.warn('[velocap/bg] thumbnail capture failed', e);
       }
     }
 
@@ -706,7 +706,7 @@ async function onRecordedFromOffscreen(msg: {
           note: msg.note,
         });
       } catch (e) {
-        console.warn('[veloqa/bg] preview:show failed; falling back to a tab', e);
+        console.warn('[velocap/bg] preview:show failed; falling back to a tab', e);
         void chrome.tabs.create({ url: chrome.runtime.getURL('src/preview/index.html') });
       }
     } else {
@@ -726,25 +726,25 @@ async function onRecordedFromOffscreen(msg: {
  * with the captured context (collected at start + end of recording) and POST to /jams.
  */
 async function uploadPendingPreview(req: { title?: string; annotatedDataUrl?: string }): Promise<BgResponse> {
-  console.log('[veloqa/bg] uploadPendingPreview called, state.kind:', state.kind);
+  console.log('[velocap/bg] uploadPendingPreview called, state.kind:', state.kind);
 
   // If state is idle, try to restore from storage (service worker may have restarted)
   if (state.kind === 'idle') {
-    console.log('[veloqa/bg] uploadPendingPreview: state is idle, trying to restore from storage');
+    console.log('[velocap/bg] uploadPendingPreview: state is idle, trying to restore from storage');
     const restored = await restorePendingPreview();
     if (!restored) {
-      console.log('[veloqa/bg] uploadPendingPreview: could not restore from storage');
+      console.log('[velocap/bg] uploadPendingPreview: could not restore from storage');
       return { ok: false, code: 'no_preview', message: 'Nothing to upload' };
     }
-    console.log('[veloqa/bg] uploadPendingPreview: restored from storage successfully');
+    console.log('[velocap/bg] uploadPendingPreview: restored from storage successfully');
   }
 
   if (state.kind !== 'pending-preview') {
-    console.log('[veloqa/bg] uploadPendingPreview: not in pending-preview state, returning error');
+    console.log('[velocap/bg] uploadPendingPreview: not in pending-preview state, returning error');
     return { ok: false, code: 'no_preview', message: 'Nothing to upload' };
   }
   const pending = state;
-  console.log('[veloqa/bg] uploadPendingPreview: pending state', {
+  console.log('[velocap/bg] uploadPendingPreview: pending state', {
     hasDataUrl: !!pending.dataUrl,
     dataUrlLength: pending.dataUrl?.length ?? 0,
     durationMs: pending.durationMs,
@@ -755,7 +755,7 @@ async function uploadPendingPreview(req: { title?: string; annotatedDataUrl?: st
     // (user may have navigated away, reloaded, etc.)
     const ctx = pending.capturedContext ?? fallbackContext({ url: '', title: '' } as chrome.tabs.Tab);
 
-    console.log('[veloqa/bg] uploadPendingPreview: using captured context', {
+    console.log('[velocap/bg] uploadPendingPreview: using captured context', {
       consoleCount: ctx.console.length,
       networkCount: ctx.network.length,
       actionsCount: ctx.actions.length,
@@ -792,7 +792,6 @@ async function uploadPendingPreview(req: { title?: string; annotatedDataUrl?: st
 function discardPendingPreview(): void {
   state = { kind: 'idle' };
   void clearPersistedPreview();
-  setError('discarded', 'Recording discarded');
 }
 
 function onRecorderError(message: string): void {
@@ -871,11 +870,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg?.kind === 'bg:get-pending-preview') {
     if (state.kind !== 'pending-preview') {
-      console.log('[veloqa/bg] get-pending-preview: no pending', state.kind);
+      console.log('[velocap/bg] get-pending-preview: no pending', state.kind);
       sendResponse({ empty: true });
       return false;
     }
-    console.log('[veloqa/bg] get-pending-preview: returning', state.bytes, 'bytes');
+    console.log('[velocap/bg] get-pending-preview: returning', state.bytes, 'bytes');
     sendResponse({
       dataUrl: state.dataUrl,
       durationMs: state.durationMs,
@@ -897,13 +896,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chrome.downloads.download(
       {
         url: state.dataUrl,
-        filename: `veloqa-${Date.now()}.${state.mediaType === 'screenshot' ? 'png' : 'webm'}`,
+        filename: `velocap-${Date.now()}.${state.mediaType === 'screenshot' ? 'png' : 'webm'}`,
         saveAs: true,
       },
       (downloadId) => {
         const err = chrome.runtime.lastError;
         if (err || downloadId == null) {
-          console.error('[veloqa/bg] download failed', err);
+          console.error('[velocap/bg] download failed', err);
           sendResponse({ ok: false, message: err?.message ?? 'Download failed' });
         } else {
           sendResponse({ ok: true, downloadId });
@@ -914,7 +913,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   // Handle auth token from dashboard content script
   if (msg?.kind === 'auth-from-dashboard' && msg.token) {
-    console.log('[veloqa/bg] received auth-from-dashboard');
+    console.log('[velocap/bg] received auth-from-dashboard');
     void (async () => {
       try {
         const user = await api.verifyClerkToken(msg.token);
@@ -925,15 +924,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           activeWorkspaceId: 'default',
         };
         await setAuth(authState);
-        console.log('[veloqa/bg] auth stored successfully from dashboard');
+        console.log('[velocap/bg] auth stored successfully from dashboard');
         sendResponse({ ok: true });
         // Close the dashboard auth tab after successful auth
         if (sender.tab?.id) {
-          console.log('[veloqa/bg] closing auth tab', sender.tab.id);
+          console.log('[velocap/bg] closing auth tab', sender.tab.id);
           chrome.tabs.remove(sender.tab.id);
         }
       } catch (e) {
-        console.error('[veloqa/bg] auth-from-dashboard failed:', e);
+        console.error('[velocap/bg] auth-from-dashboard failed:', e);
         sendResponse({ ok: false, error: e instanceof Error ? e.message : 'Auth failed' });
       }
     })();
@@ -956,7 +955,7 @@ void ({} as StateReq);
 // Handle Clerk auth callback from dashboard
 chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
   if (msg?.kind === 'clerk-auth-callback' && msg.token) {
-    console.log('[veloqa/bg] received clerk-auth-callback from', sender.origin);
+    console.log('[velocap/bg] received clerk-auth-callback from', sender.origin);
     // Verify the token and store auth
     void (async () => {
       try {
@@ -968,10 +967,10 @@ chrome.runtime.onMessageExternal.addListener((msg, sender, sendResponse) => {
           activeWorkspaceId: 'default',
         };
         await setAuth(authState);
-        console.log('[veloqa/bg] auth stored successfully');
+        console.log('[velocap/bg] auth stored successfully');
         sendResponse({ ok: true });
       } catch (e) {
-        console.error('[veloqa/bg] clerk-auth-callback failed:', e);
+        console.error('[velocap/bg] clerk-auth-callback failed:', e);
         sendResponse({ ok: false, error: e instanceof Error ? e.message : 'Auth failed' });
       }
     })();

@@ -72,7 +72,7 @@ function enableScrubbingFor(video: HTMLVideoElement): void {
 
 function render(state: PreviewState): void {
   metaEl.textContent = `${fmtDuration(state.durationMs)} · ${fmtSize(state.bytes)}`;
-  console.log('[veloqa/preview] rendering', {
+  console.log('[velocap/preview] rendering', {
     bytes: state.bytes,
     durationMs: state.durationMs,
     dataUrlLen: state.dataUrl?.length,
@@ -89,7 +89,7 @@ function render(state: PreviewState): void {
       <div class="row right">
         <button id="discard" class="danger">Discard</button>
         <button id="download">Download</button>
-        <button id="upload" class="primary">Upload &amp; get link</button>
+        <button id="upload" class="primary">Upload</button>
       </div>
       <div class="status" id="status"></div>
     </div>
@@ -99,21 +99,21 @@ function render(state: PreviewState): void {
   enableScrubbingFor(video);
   void dataUrlToBlob(state.dataUrl)
     .then((blob) => {
-      console.log('[veloqa/preview] blob ready', blob.size, blob.type);
+      console.log('[velocap/preview] blob ready', blob.size, blob.type);
       const objectUrl = URL.createObjectURL(blob);
       video.src = objectUrl;
       video.load();
       window.addEventListener('beforeunload', () => URL.revokeObjectURL(objectUrl));
     })
     .catch((e) => {
-      console.error('[veloqa/preview] blob conversion failed', e);
+      console.error('[velocap/preview] blob conversion failed', e);
       // Fall back to the raw data URL — less robust, but extension-origin
       // pages can usually play data: URLs.
       video.src = state.dataUrl;
       video.load();
     });
   video.addEventListener('error', () => {
-    console.error('[veloqa/preview] video error', video.error);
+    console.error('[velocap/preview] video error', video.error);
     setStatus(
       `Video playback failed (${video.error?.message ?? 'unknown'}). Use Download to save the file.`,
       'err',
@@ -152,7 +152,7 @@ function render(state: PreviewState): void {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `veloqa-${Date.now()}.webm`;
+        a.download = `velocap-${Date.now()}.webm`;
         a.click();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
         setStatus('✓ Download started (fallback)', 'ok');
@@ -164,26 +164,27 @@ function render(state: PreviewState): void {
 
   uploadBtn.addEventListener('click', async () => {
     uploadBtn.disabled = true;
+    uploadBtn.textContent = 'Uploading…';
     discardBtn.disabled = true;
     downloadBtn.disabled = true;
-    setStatus('Uploading…');
+
     const res = await chrome.runtime.sendMessage({
       kind: 'bg:preview-upload',
       title: titleInput.value.trim() || undefined,
     });
+
     if (res?.ok) {
-      // Copy URL to clipboard automatically
       try {
         await navigator.clipboard.writeText(res.url);
-        setStatus('✓ Uploaded & copied to clipboard!', 'ok');
-      } catch {
-        setStatus('✓ Uploaded', 'ok');
-      }
+      } catch { /* ignore */ }
 
-      // Update the buttons - hide old ones and show new actions
-      uploadBtn.textContent = 'Open Jam';
+      uploadBtn.textContent = '✓ Uploaded';
       uploadBtn.disabled = false;
-      uploadBtn.onclick = () => window.open(res.url, '_blank');
+      uploadBtn.className = 'primary';
+      setTimeout(() => {
+        uploadBtn.textContent = 'Open';
+        uploadBtn.onclick = () => window.open(res.url, '_blank');
+      }, 1200);
 
       discardBtn.textContent = 'Close';
       discardBtn.className = 'ghost';
@@ -191,6 +192,7 @@ function render(state: PreviewState): void {
       discardBtn.onclick = () => window.close();
 
       downloadBtn.textContent = 'Copy Link';
+      downloadBtn.className = 'secondary';
       downloadBtn.disabled = false;
       downloadBtn.onclick = async () => {
         try {
@@ -201,11 +203,14 @@ function render(state: PreviewState): void {
           setStatus('Failed to copy', 'err');
         }
       };
+
+      setStatus('✓ Uploaded & copied to clipboard!', 'ok');
     } else {
-      setStatus(res?.message || 'Upload failed', 'err');
+      uploadBtn.textContent = 'Upload';
       uploadBtn.disabled = false;
       discardBtn.disabled = false;
       downloadBtn.disabled = false;
+      setStatus(res?.message || 'Upload failed', 'err');
     }
   });
 }
@@ -487,7 +492,7 @@ async function renderScreenshot(state: PreviewState): Promise<void> {
     const dataUrl = exportAnnotatedImage();
     const a = document.createElement('a');
     a.href = dataUrl;
-    a.download = `veloqa-${Date.now()}.png`;
+    a.download = `velocap-${Date.now()}.png`;
     a.click();
     setStatus('Download started', 'ok');
   });
@@ -552,7 +557,7 @@ const isEmbedded = new URLSearchParams(location.search).get('embed') === '1';
 
 function closeOuter(): void {
   if (isEmbedded) {
-    window.parent.postMessage({ tag: 'veloqa/preview', action: 'close' }, '*');
+    window.parent.postMessage({ tag: 'velocap/preview', action: 'close' }, '*');
   } else {
     window.close();
   }

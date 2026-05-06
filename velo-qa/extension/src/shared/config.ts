@@ -10,6 +10,6 @@ export const DASHBOARD_URL: string =
   'http://localhost:3001';
 
 export const STORAGE_KEYS = {
-  auth: 'veloqa.auth',
-  activeWorkspaceId: 'veloqa.activeWorkspaceId',
+  auth: 'velocap.auth',
+  activeWorkspaceId: 'velocap.activeWorkspaceId',
 } as const;

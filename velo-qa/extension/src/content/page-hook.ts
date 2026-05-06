@@ -2,13 +2,13 @@
 // be patched — the isolated-world content script can't see the page's global
 // console. We forward events back to the content script via window.postMessage.
 
-const TAG = 'veloqa/hook';
+const TAG = 'velocap/hook';
 
 // Visible marker so users can confirm the hook installed.
 // eslint-disable-next-line no-console
-console.info('%c[Velo QA] page-hook installed', 'color:#ff4d7e;font-weight:bold');
-(window as unknown as { __veloqa?: { hook: boolean } }).__veloqa = {
-  ...((window as unknown as { __veloqa?: object }).__veloqa ?? {}),
+console.info('%c[VeloCap] page-hook installed', 'color:#ff4d7e;font-weight:bold');
+(window as unknown as { __velocap?: { hook: boolean } }).__velocap = {
+  ...((window as unknown as { __velocap?: object }).__velocap ?? {}),
   hook: true,
 };
 
@@ -101,7 +101,7 @@ function buildSelectors(el: Element): { primary: string; alternates: string[] } 
 }
 
 function isOwnUi(el: Element): boolean {
-  return !!el.closest?.('[data-veloqa-overlay], [data-veloqa-preview]');
+  return !!el.closest?.('[data-velocap-overlay], [data-velocap-preview]');
 }
 
 function shouldMask(el: Element): boolean {

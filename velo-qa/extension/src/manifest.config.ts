@@ -7,7 +7,7 @@ const isRelease = process.env.EXT_BUILD_MODE === 'release';
 
 const dashboardOrigins = [
   ...(isRelease ? [] : ['http://localhost:3001/*']),
-  'https://*.veloqa.com/*',
+  'https://*.velocap.com/*',
   'https://salmon-sea-0c8c28b03.7.azurestaticapps.net/*',
   'https://ambitious-wave-08351ef03.7.azurestaticapps.net/*',
 ];
@@ -22,7 +22,7 @@ export default defineManifest({
   name: 'VeloCap',
   short_name: 'VeloCap',
   description: 'One-click bug capture — record screen, console, network, and user actions, then share a repro link.',
-  version: '0.1.0',
+  version: '0.2.0',
   action: {
     default_popup: 'src/popup/index.html',
     default_title: 'VeloCap — capture a bug',

@@ -100,9 +100,16 @@ async function getDisplayCaptureStream(
 ): Promise<{ stream: MediaStream; audioNote?: string }> {
   try {
     const stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: { ideal: 30 } },
+      video: {
+        frameRate: { ideal: 30 },
+        displaySurface: 'monitor',
+      } as MediaTrackConstraints,
       audio: withAudio,
-    });
+      // @ts-ignore — Chrome-specific: hide the "Chrome Tab" option
+      preferCurrentTab: false,
+      selfBrowserSurface: 'exclude',
+      monitorTypeSurfaces: 'include',
+    } as DisplayMediaStreamOptions);
     return { stream };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -110,9 +117,16 @@ async function getDisplayCaptureStream(
       // Retry silently — user may have only granted video.
       try {
         const stream = await navigator.mediaDevices.getDisplayMedia({
-          video: { frameRate: { ideal: 30 } },
+          video: {
+            frameRate: { ideal: 30 },
+            displaySurface: 'monitor',
+          } as MediaTrackConstraints,
           audio: false,
-        });
+          // @ts-ignore
+          preferCurrentTab: false,
+          selfBrowserSurface: 'exclude',
+          monitorTypeSurfaces: 'include',
+        } as DisplayMediaStreamOptions);
         return { stream, audioNote: `System audio unavailable (${msg})` };
       } catch {
         // fall through
@@ -123,7 +137,7 @@ async function getDisplayCaptureStream(
 }
 
 async function start(msg: StartMsg): Promise<void> {
-  console.log('[veloqa/offscreen] start', {
+  console.log('[velocap/offscreen] start', {
     source: msg.source,
     captureAudio: msg.captureAudio,
     mic: msg.mic,
@@ -180,9 +194,9 @@ async function start(msg: StartMsg): Promise<void> {
   ]);
 
   const mimeType = pickMime();
-  console.log('[veloqa/offscreen] using mimeType:', mimeType);
-  console.log('[veloqa/offscreen] video tracks:', combined.getVideoTracks().length);
-  console.log('[veloqa/offscreen] audio tracks:', combined.getAudioTracks().length);
+  console.log('[velocap/offscreen] using mimeType:', mimeType);
+  console.log('[velocap/offscreen] video tracks:', combined.getVideoTracks().length);
+  console.log('[velocap/offscreen] audio tracks:', combined.getAudioTracks().length);
 
   const recorder = new MediaRecorder(combined, {
     mimeType,
@@ -192,7 +206,7 @@ async function start(msg: StartMsg): Promise<void> {
   const chunks: Blob[] = [];
 
   recorder.ondataavailable = (e) => {
-    console.log('[veloqa/offscreen] ondataavailable:', e.data.size, 'bytes');
+    console.log('[velocap/offscreen] ondataavailable:', e.data.size, 'bytes');
     if (e.data.size) chunks.push(e.data);
   };
 
@@ -213,7 +227,7 @@ async function start(msg: StartMsg): Promise<void> {
     for (const src of s.sources) src.getTracks().forEach((t) => t.stop());
     if (s.audioCtx) void s.audioCtx.close().catch(() => undefined);
     try {
-      console.log('[veloqa/offscreen] finalizing', {
+      console.log('[velocap/offscreen] finalizing', {
         chunkCount: chunks.length,
         chunkSizes: chunks.map((c) => c.size),
         mime: s.mimeType,
@@ -223,12 +237,12 @@ async function start(msg: StartMsg): Promise<void> {
       // Use the actual MIME type from the first chunk if available,
       // as MediaRecorder may use a different format than requested.
       const actualMime = chunks[0]?.type || s.mimeType || 'video/webm';
-      console.log('[veloqa/offscreen] using actualMime:', actualMime);
+      console.log('[velocap/offscreen] using actualMime:', actualMime);
 
       const raw = new Blob(chunks, { type: actualMime });
       const durationMs = Date.now() - s.startedAt;
 
-      console.log('[veloqa/offscreen] raw blob size:', raw.size, 'type:', raw.type);
+      console.log('[velocap/offscreen] raw blob size:', raw.size, 'type:', raw.type);
 
       const dataUrl = await blobToDataUrl(raw);
       await chrome.runtime.sendMessage({
@@ -268,24 +282,24 @@ async function start(msg: StartMsg): Promise<void> {
   // Start without timeslice - this produces a single complete WebM on stop.
   // Timeslice mode produces chunks that aren't independently valid WebM files.
   recorder.start();
-  console.log('[veloqa/offscreen] recorder started (no timeslice)');
+  console.log('[velocap/offscreen] recorder started (no timeslice)');
 }
 
 function stop(): void {
-  console.log('[veloqa/offscreen] stop called, session:', !!session);
+  console.log('[velocap/offscreen] stop called, session:', !!session);
   if (!session) return;
-  console.log('[veloqa/offscreen] recorder state:', session.recorder.state);
+  console.log('[velocap/offscreen] recorder state:', session.recorder.state);
   if (session.recorder.state !== 'inactive') {
     // Force the recorder to flush its current buffer before stop so the
     // final WebM is complete even for very short recordings.
     try {
       session.recorder.requestData();
-      console.log('[veloqa/offscreen] requestData called');
+      console.log('[velocap/offscreen] requestData called');
     } catch (e) {
-      console.log('[veloqa/offscreen] requestData failed:', e);
+      console.log('[velocap/offscreen] requestData failed:', e);
     }
     session.recorder.stop();
-    console.log('[veloqa/offscreen] stop called on recorder');
+    console.log('[velocap/offscreen] stop called on recorder');
   }
 }
 
@@ -300,7 +314,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 
 // Global error handler to catch any unhandled errors
 self.onerror = (message, _source, _lineno, _colno, error) => {
-  console.error('[veloqa/offscreen] Global error:', message, error);
+  console.error('[velocap/offscreen] Global error:', message, error);
   chrome.runtime.sendMessage({
     target: 'bg',
     kind: 'recorder-error',
@@ -309,7 +323,7 @@ self.onerror = (message, _source, _lineno, _colno, error) => {
 };
 
 self.onunhandledrejection = (event) => {
-  console.error('[veloqa/offscreen] Unhandled rejection:', event.reason);
+  console.error('[velocap/offscreen] Unhandled rejection:', event.reason);
   chrome.runtime.sendMessage({
     target: 'bg',
     kind: 'recorder-error',
@@ -323,35 +337,35 @@ chrome.runtime.onMessage.addListener(
     if (msg?.target !== 'offscreen') {
       return false;
     }
-    console.log('[veloqa/offscreen] received message:', msg?.kind);
+    console.log('[velocap/offscreen] received message:', msg?.kind);
     if (msg.kind === 'ping') {
-      console.log('[veloqa/offscreen] responding to ping');
+      console.log('[velocap/offscreen] responding to ping');
       sendResponse({ ok: true });
       return false;
     }
     if (msg.kind === 'start') {
-      console.log('[veloqa/offscreen] handling start');
+      console.log('[velocap/offscreen] handling start');
       start(msg as StartMsg)
         .then(() => {
-          console.log('[veloqa/offscreen] start resolved, sending response');
+          console.log('[velocap/offscreen] start resolved, sending response');
           sendResponse({ ok: true });
         })
         .catch((err) => {
           const message = err instanceof Error ? err.message : String(err);
-          console.error('[veloqa/offscreen] start failed', err);
+          console.error('[velocap/offscreen] start failed', err);
           sendResponse({ ok: false, message });
         });
       return true; // Keep message channel open for async response
     }
     if (msg.kind === 'stop') {
-      console.log('[veloqa/offscreen] stop');
+      console.log('[velocap/offscreen] stop');
       stop();
       sendResponse({ ok: true });
       return false;
     }
-    console.log('[veloqa/offscreen] unknown message kind:', (msg as { kind?: string }).kind);
+    console.log('[velocap/offscreen] unknown message kind:', (msg as { kind?: string }).kind);
     return false;
   },
 );
 
-console.log('[veloqa/offscreen] script loaded and listener registered');
+console.log('[velocap/offscreen] script loaded and listener registered');

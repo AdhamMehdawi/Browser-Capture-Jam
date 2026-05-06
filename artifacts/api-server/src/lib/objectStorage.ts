@@ -137,6 +137,32 @@ export class ObjectStorageService {
     return `${blob.url}?${sas}`;
   }
 
+  /**
+   * Generate a read-only SAS URL for a stored object.
+   * Returns null if objectPath is null/undefined.
+   */
+  getReadOnlySasUrl(
+    objectPath: string | null | undefined,
+    expiryMinutes = 60,
+  ): string | null {
+    if (!objectPath) return null;
+    const entityId = objectPath.replace(/^\/objects\//, "");
+    if (!entityId) return null;
+    const blobName = `${PRIVATE_PREFIX}/${entityId}`;
+    const blob = this.container.getBlockBlobClient(blobName);
+    const sas = generateBlobSASQueryParameters(
+      {
+        containerName: this.container.containerName,
+        blobName,
+        permissions: BlobSASPermissions.parse("r"),
+        startsOn: new Date(Date.now() - 60_000),
+        expiresOn: new Date(Date.now() + expiryMinutes * 60_000),
+      },
+      this.sharedKey,
+    ).toString();
+    return `${blob.url}?${sas}`;
+  }
+
   async getObjectEntityFile(objectPath: string): Promise<BlockBlobClient> {
     if (!objectPath.startsWith("/objects/")) {
       throw new ObjectNotFoundError();

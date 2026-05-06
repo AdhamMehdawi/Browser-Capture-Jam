@@ -2,6 +2,9 @@ import { Router } from "express";
 import { db } from "@workspace/db";
 import { recordingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { ObjectStorageService } from "../lib/objectStorage";
+
+const objectStorageService = new ObjectStorageService();
 
 const router = Router();
 
@@ -28,6 +31,8 @@ router.get("/share/:token", async (req: any, res) => {
       clickCount: recording.clickCount,
       videoObjectPath: recording.videoObjectPath,
       thumbnailObjectPath: recording.thumbnailObjectPath,
+      videoUrl: objectStorageService.getReadOnlySasUrl(recording.videoObjectPath),
+      thumbnailUrl: objectStorageService.getReadOnlySasUrl(recording.thumbnailObjectPath),
       shareToken: recording.shareToken,
       tags: recording.tags,
       browserInfo: recording.browserInfo,

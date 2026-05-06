@@ -4,6 +4,9 @@ import { recordingsTable } from "@workspace/db";
 import { eq, and, desc, sql, ilike, or } from "drizzle-orm";
 import crypto from "crypto";
 import { requireAuth } from "../middlewares/requireAuth";
+import { ObjectStorageService } from "../lib/objectStorage";
+
+const objectStorageService = new ObjectStorageService();
 
 const router = Router();
 
@@ -346,6 +349,8 @@ function sanitizeRecording(r: typeof recordingsTable.$inferSelect) {
     clickCount: r.clickCount,
     videoObjectPath: r.videoObjectPath,
     thumbnailObjectPath: r.thumbnailObjectPath,
+    videoUrl: objectStorageService.getReadOnlySasUrl(r.videoObjectPath),
+    thumbnailUrl: objectStorageService.getReadOnlySasUrl(r.thumbnailObjectPath),
     shareToken: r.shareToken,
     tags,
     browserInfo,

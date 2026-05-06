@@ -421,9 +421,6 @@ importers:
       '@clerk/react':
         specifier: ^6.4.2
         version: 6.4.2(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
-      fix-webm-duration:
-        specifier: ^1.0.6
-        version: 1.0.6
       plyr:
         specifier: ^3.8.4
         version: 3.8.4
@@ -2585,9 +2582,6 @@ packages:
   find-up@8.0.0:
     resolution: {integrity: sha512-JGG8pvDi2C+JxidYdIwQDyS/CgcrIdh18cvgxcBge3wSHRQOrooMD3GlFBcmMJAN9M42SAZjDp5zv1dglJjwww==}
     engines: {node: '>=20'}
-
-  fix-webm-duration@1.0.6:
-    resolution: {integrity: sha512-zVAqi4gE+8ywxJuAyV/rlJVX6CMtvyapEbQx6jyoeX9TMjdqAlt/FdG5d7rXSSkDVzTvS0H7CtwzHcH/vh4FPA==}
 
   follow-redirects@1.16.0:
     resolution: {integrity: sha512-y5rN/uOsadFT/JfYwhxRS5R7Qce+g3zG97+JrtFZlC9klX/W5hD7iiLzScI4nZqUS7DNUdhPgw4xI8W2LuXlUw==}
@@ -5887,8 +5881,6 @@ snapshots:
     dependencies:
       locate-path: 8.0.0
       unicorn-magic: 0.3.0
-
-  fix-webm-duration@1.0.6: {}
 
   follow-redirects@1.16.0(debug@4.4.3):
     optionalDependencies:

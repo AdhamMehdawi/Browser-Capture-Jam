@@ -1,7 +1,7 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useParams, Link } from "wouter";
 import { format } from "date-fns";
-import "plyr/dist/plyr.css";
+import { StreamingVideoPlayer } from "@/components/StreamingVideoPlayer";
 import {
   Globe, Terminal, MousePointerClick, Activity,
   Search, Info, Clock, AlertCircle, AlertTriangle,
@@ -116,133 +116,7 @@ function PayloadBlock({ label, body }: { label: string; body: string }) {
   );
 }
 
-// ============================================================
-// FixedVideoPlayer — Plyr + duration patching
-// ============================================================
-function FixedVideoPlayer({
-  videoUrl,
-  knownDurationMs,
-}: {
-  videoUrl: string;
-  knownDurationMs: number | null | undefined;
-}) {
-  const [src, setSrc] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const createdBlobUrl = useRef<string | null>(null);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const plyrRef = useRef<{ destroy(): void } | null>(null);
-  const knownSec = knownDurationMs ? knownDurationMs / 1000 : 0;
-
-  useEffect(() => {
-    let cancelled = false;
-    setSrc(null);
-    setError(null);
-
-    (async () => {
-      try {
-        const res = await fetch(videoUrl);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const blob = await res.blob();
-        let patched = blob;
-        if (knownDurationMs && knownDurationMs > 0 && blob.type.includes('webm')) {
-          try {
-            const mod = await import('fix-webm-duration');
-            const fixer = (mod as { default?: unknown }).default ?? mod;
-            patched = await new Promise<Blob>((resolve, reject) => {
-              (fixer as (b: Blob, d: number, cb: (out: Blob) => void) => void)(blob, knownDurationMs, (out) => resolve(out));
-              setTimeout(() => reject(new Error('patcher timeout')), 5000);
-            }).catch((e) => {
-              console.warn('[dashboard] duration patch failed, using raw blob', e);
-              return blob;
-            });
-          } catch (e) {
-            console.warn('[dashboard] fix-webm-duration import failed', e);
-          }
-        }
-        if (cancelled) return;
-        const url = URL.createObjectURL(patched);
-        if (createdBlobUrl.current) URL.revokeObjectURL(createdBlobUrl.current);
-        createdBlobUrl.current = url;
-        setSrc(url);
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      if (createdBlobUrl.current) {
-        URL.revokeObjectURL(createdBlobUrl.current);
-        createdBlobUrl.current = null;
-      }
-    };
-  }, [videoUrl, knownDurationMs]);
-
-  useEffect(() => {
-    if (!src || !videoRef.current) return;
-    let player: { destroy(): void } | null = null;
-
-    import('plyr').then((mod) => {
-      const PlyrClass = (mod.default ?? mod) as unknown as new (el: HTMLVideoElement, opts: Record<string, unknown>) => { destroy(): void };
-      if (!videoRef.current) return;
-      player = new PlyrClass(videoRef.current, {
-        controls: [
-          'play-large', 'rewind', 'play', 'fast-forward',
-          'progress', 'current-time', 'duration',
-          'mute', 'volume', 'settings', 'fullscreen',
-        ],
-        settings: ['speed'],
-        speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] },
-        keyboard: { focused: true, global: false },
-        tooltips: { controls: true, seek: true },
-        seekTime: 5,
-        ...(knownSec > 0 ? { duration: knownSec } : {}),
-      });
-      plyrRef.current = player;
-    });
-
-    return () => {
-      if (player) {
-        player.destroy();
-        plyrRef.current = null;
-      }
-    };
-  }, [src, knownSec]);
-
-  const fixDuration = (v: HTMLVideoElement) => {
-    const reported = v.duration;
-    if (
-      !Number.isFinite(reported) ||
-      Number.isNaN(reported) ||
-      (knownSec > 0 && reported < knownSec * 0.8)
-    ) {
-      const onSeeked = () => {
-        v.removeEventListener('seeked', onSeeked);
-        v.currentTime = 0;
-      };
-      v.addEventListener('seeked', onSeeked);
-      v.currentTime = 1e101;
-    }
-  };
-
-  return (
-    <div className="bg-black relative w-full h-full plyr-container">
-      {src ? (
-        <video
-          ref={videoRef}
-          src={src}
-          className="w-full h-full"
-          preload="metadata"
-          onLoadedMetadata={(e) => fixDuration(e.currentTarget)}
-        />
-      ) : error ? (
-        <div className="text-destructive text-sm p-6 text-center">Video failed to load: {error}</div>
-      ) : (
-        <div className="text-muted-foreground text-sm p-6 text-center">Preparing video...</div>
-      )}
-    </div>
-  );
-}
+// FixedVideoPlayer removed — replaced by StreamingVideoPlayer (shared component)
 
 // ============================================================
 // SharedRecordingViewer
@@ -336,12 +210,13 @@ export default function SharedRecordingViewer() {
     );
   }
 
+  // Use SAS URLs from API response (direct Azure access), fall back to proxy URL
   const apiBase = import.meta.env.VITE_API_URL ?? "";
   const mediaPath = recording.videoObjectPath;
-  const mediaUrl = mediaPath ? `${apiBase}/api/storage${mediaPath}` : null;
+  const proxyUrl = mediaPath ? `${apiBase}/api/storage${mediaPath}` : null;
   const isScreenshot = mediaPath && /\.(png|jpg|jpeg|gif|webp)$/i.test(mediaPath);
-  const videoUrl = mediaUrl && !isScreenshot ? mediaUrl : null;
-  const screenshotUrl = mediaUrl && isScreenshot ? mediaUrl : null;
+  const videoUrl = !isScreenshot ? ((recording as any).videoUrl ?? proxyUrl) : null;
+  const screenshotUrl = isScreenshot ? ((recording as any).videoUrl ?? proxyUrl) : null;
 
   return (
     <div className="flex flex-col h-screen bg-background overflow-hidden">
@@ -384,7 +259,7 @@ export default function SharedRecordingViewer() {
                 {videoUrl ? (
                   <div className="w-full max-w-5xl">
                     <div className="rounded-lg shadow-lg bg-black">
-                      <FixedVideoPlayer videoUrl={videoUrl} knownDurationMs={recording.duration} />
+                      <StreamingVideoPlayer videoUrl={videoUrl} knownDurationMs={recording.duration} />
                     </div>
                   </div>
                 ) : screenshotUrl ? (

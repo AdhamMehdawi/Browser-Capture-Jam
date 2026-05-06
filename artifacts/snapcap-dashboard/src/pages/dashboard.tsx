@@ -187,8 +187,11 @@ export default function Dashboard() {
                         {(() => {
                           const path = recording.videoObjectPath;
                           const thumbPath = recording.thumbnailObjectPath;
+                          // Use SAS URLs from API if available, fall back to proxy
                           const apiBase = import.meta.env.VITE_API_URL ?? "";
                           const storageUrl = (p: string) => `${apiBase}/api/storage${p.startsWith('/') ? p : `/${p}`}`;
+                          const videoSasUrl = (recording as any).videoUrl as string | null | undefined;
+                          const thumbSasUrl = (recording as any).thumbnailUrl as string | null | undefined;
                           const isImage = path && /\.(png|jpg|jpeg|gif|webp)$/i.test(path);
                           const isVideo = path && !isImage && (
                             /\.(webm|mp4|mov|avi|mkv)$/i.test(path) ||
@@ -199,16 +202,16 @@ export default function Dashboard() {
                           if (isVideo) {
                             return (
                               <div className="absolute inset-0 bg-black flex items-center justify-center">
-                                {thumbPath && (
+                                {(thumbSasUrl || thumbPath) && (
                                   <img
-                                    src={storageUrl(thumbPath)}
+                                    src={thumbSasUrl || storageUrl(thumbPath!)}
                                     className="w-full h-full object-cover absolute inset-0 z-10 thumbnail-img"
                                     alt=""
                                     loading="lazy"
                                   />
                                 )}
                                 <video
-                                  src={storageUrl(path!)}
+                                  src={videoSasUrl || storageUrl(path!)}
                                   className="w-full h-full object-cover absolute inset-0"
                                   muted
                                   loop
@@ -249,7 +252,7 @@ export default function Dashboard() {
                             return (
                               <div className="absolute inset-0 bg-black flex items-center justify-center">
                                 <img
-                                  src={storageUrl(path!)}
+                                  src={videoSasUrl || storageUrl(path!)}
                                   className="w-full h-full object-cover"
                                   alt={recording.title}
                                 />

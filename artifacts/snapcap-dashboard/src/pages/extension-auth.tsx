@@ -111,7 +111,7 @@ export default function ExtensionAuth() {
   // Not signed in - show Clerk sign-in
   if (isLoaded && !isSignedIn) {
     return (
-      <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-background px-4">
+      <div className="flex min-h-[100dvh] flex-col items-center justify-center px-4">
         <div className="mb-6 text-center">
           <h1 className="text-2xl font-bold text-white mb-2">Sign in to Velo QA</h1>
           <p className="text-muted-foreground">Sign in to connect your Chrome extension</p>
@@ -127,7 +127,7 @@ export default function ExtensionAuth() {
   // Loading
   if (status === "loading" || status === "sending") {
     return (
-      <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-background px-4">
+      <div className="flex min-h-[100dvh] flex-col items-center justify-center px-4">
         <div className="text-center">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4" />
           <h1 className="text-xl font-semibold text-white mb-2">
@@ -142,7 +142,7 @@ export default function ExtensionAuth() {
   // Error
   if (status === "error") {
     return (
-      <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-background px-4">
+      <div className="flex min-h-[100dvh] flex-col items-center justify-center px-4">
         <div className="text-center max-w-md">
           <div className="text-red-500 text-4xl mb-4">✕</div>
           <h1 className="text-xl font-semibold text-white mb-2">Authentication Failed</h1>
@@ -168,31 +168,62 @@ export default function ExtensionAuth() {
     }, 100);
   };
 
+  const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(" ");
+  const signedInAs =
+    user?.primaryEmailAddress?.emailAddress ||
+    user?.emailAddresses?.[0]?.emailAddress ||
+    user?.username ||
+    user?.fullName ||
+    fullName ||
+    null;
+
   // Success
   return (
-    <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-background px-4">
-      <div className="text-center max-w-md">
-        <div className="text-green-500 text-4xl mb-4">✓</div>
-        <h1 className="text-xl font-semibold text-white mb-2">Extension Connected!</h1>
-        <p className="text-muted-foreground mb-2">
-          Signed in as <span className="text-white">{user?.primaryEmailAddress?.emailAddress}</span>
-        </p>
-        <p className="text-muted-foreground mb-6">
+    <div className="flex min-h-[100dvh] flex-col items-center justify-center px-4">
+      <div className="w-full max-w-md rounded-2xl border border-border bg-card p-8 text-center shadow-2xl">
+        <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-emerald-500/10 ring-4 ring-emerald-500/20">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-10 w-10 text-emerald-400"
+            aria-hidden="true"
+          >
+            <path d="M5 13l4 4L19 7" />
+          </svg>
+        </div>
+
+        {signedInAs ? (
+          <p className="mb-2 text-sm text-muted-foreground">
+            Signed in as{" "}
+            <span className="font-semibold text-foreground">{signedInAs}</span>
+          </p>
+        ) : null}
+
+        <h1 className="mb-2 text-2xl font-semibold text-foreground">
+          Extension Connected
+        </h1>
+        <p className="mb-7 text-sm text-muted-foreground">
           You can now close this tab and use the extension.
         </p>
-        <div className="flex gap-3 justify-center">
-          <button
-            onClick={handleClose}
-            className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary/90"
-          >
-            Close Tab
-          </button>
+
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-center sm:gap-3">
           <a
             href="/dashboard"
-            className="px-4 py-2 bg-muted text-white rounded-md hover:bg-muted/80"
+            className="inline-flex items-center justify-center rounded-md border border-border bg-card px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
           >
             Go to Dashboard
           </a>
+          <button
+            onClick={handleClose}
+            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
+          >
+            Close Tab
+          </button>
         </div>
       </div>
     </div>

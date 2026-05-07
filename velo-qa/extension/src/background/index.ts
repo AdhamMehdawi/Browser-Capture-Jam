@@ -59,8 +59,13 @@ type BgState =
 
 let state: BgState = { kind: 'idle' };
 let lastError: { code: string; message: string; at: number } | null = null;
-/** Tab where the recording overlay was injected, so we can tear it down later. */
-let overlayTabId: number | null = null;
+/**
+ * Tabs that currently have the recording overlay injected. We track all of
+ * them (not just the originating tab) so the user can see the timer + Stop
+ * button no matter which tab they switch to mid-recording, and we can tear
+ * them all down on stop.
+ */
+const overlayTabIds = new Set<number>();
 
 // Storage key for persisting pending preview data (survives service worker restarts)
 const PENDING_PREVIEW_STORAGE_KEY = 'velocap.pendingPreview';
@@ -129,7 +134,7 @@ void restorePendingPreview();
 async function showOverlayOn(tabId: number, startedAt: number): Promise<void> {
   try {
     await chrome.tabs.sendMessage(tabId, { kind: 'overlay:show', startedAt });
-    overlayTabId = tabId;
+    overlayTabIds.add(tabId);
   } catch {
     // Content script isn't present — inject it, then retry once.
     try {
@@ -141,7 +146,7 @@ async function showOverlayOn(tabId: number, startedAt: number): Promise<void> {
         await chrome.scripting.executeScript({ target: { tabId }, files: isolated.js });
       }
       await chrome.tabs.sendMessage(tabId, { kind: 'overlay:show', startedAt });
-      overlayTabId = tabId;
+      overlayTabIds.add(tabId);
     } catch (e) {
       console.warn('[velocap/bg] overlay inject failed', e);
     }
@@ -149,14 +154,47 @@ async function showOverlayOn(tabId: number, startedAt: number): Promise<void> {
 }
 
 async function hideOverlayIfAny(): Promise<void> {
-  if (overlayTabId == null) return;
-  try {
-    await chrome.tabs.sendMessage(overlayTabId, { kind: 'overlay:hide' });
-  } catch {
-    // tab may be gone
-  }
-  overlayTabId = null;
+  const ids = Array.from(overlayTabIds);
+  overlayTabIds.clear();
+  await Promise.all(
+    ids.map(async (id) => {
+      try {
+        await chrome.tabs.sendMessage(id, { kind: 'overlay:hide' });
+      } catch {
+        // tab may be gone or content script unloaded
+      }
+    }),
+  );
 }
+
+// Keep the overlay visible on whichever tab the user is looking at during a
+// recording. Without this, the timer + Stop button only render on the
+// originating tab, so switching tabs leaves the user with no way to see
+// elapsed time or stop the recording without navigating back.
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  if (state.kind === 'recording') {
+    void showOverlayOn(tabId, state.startedAt);
+  }
+});
+
+// When a tab that previously had the overlay navigates to a new page, the
+// content script is reset and our overlay DOM is gone. Re-inject so the
+// user keeps seeing the timer after the new page loads.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (
+    state.kind === 'recording' &&
+    changeInfo.status === 'complete' &&
+    overlayTabIds.has(tabId)
+  ) {
+    void showOverlayOn(tabId, state.startedAt);
+  }
+});
+
+// Drop tabs from our set when they close so the next stop doesn't try to
+// message a dead tab.
+chrome.tabs.onRemoved.addListener((tabId) => {
+  overlayTabIds.delete(tabId);
+});
 
 function setError(code: string, message: string): void {
   lastError = { code, message, at: Date.now() };

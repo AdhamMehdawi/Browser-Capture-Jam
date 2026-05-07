@@ -127,9 +127,20 @@ function render(state: PreviewState): void {
   };
 
   const titleInput = document.getElementById('title') as HTMLInputElement;
-  const discardBtn = document.getElementById('discard') as HTMLButtonElement;
-  const downloadBtn = document.getElementById('download') as HTMLButtonElement;
-  const uploadBtn = document.getElementById('upload') as HTMLButtonElement;
+  let discardBtn = document.getElementById('discard') as HTMLButtonElement;
+  let downloadBtn = document.getElementById('download') as HTMLButtonElement;
+  let uploadBtn = document.getElementById('upload') as HTMLButtonElement;
+
+  // Replace a button so all previously-attached listeners are dropped — the
+  // post-upload state rebinds these buttons, and a stale download/discard
+  // handler firing alongside the new "Copy Link" / "Close" handler caused a
+  // file download or premature window close on click.
+  const swapHandler = (btn: HTMLButtonElement, onClick: (e: MouseEvent) => void): HTMLButtonElement => {
+    const fresh = btn.cloneNode(true) as HTMLButtonElement;
+    btn.replaceWith(fresh);
+    fresh.addEventListener('click', onClick);
+    return fresh;
+  };
 
   discardBtn.addEventListener('click', async () => {
     await chrome.runtime.sendMessage({ kind: 'bg:preview-discard' });
@@ -178,31 +189,58 @@ function render(state: PreviewState): void {
         await navigator.clipboard.writeText(res.url);
       } catch { /* ignore */ }
 
+      // Title is finalized — lock it so the user can still read what they
+      // entered but can no longer edit it.
+      titleInput.readOnly = true;
+      titleInput.classList.add('readonly');
+
+      // Surface the entered title in the header so the user clearly sees
+      // "this image is titled X" alongside the file metadata. Built via
+      // DOM nodes (not innerHTML) to keep user input safe from XSS.
+      const enteredTitle = titleInput.value.trim();
+      if (enteredTitle) {
+        const originalMeta = metaEl.textContent ?? '';
+        metaEl.textContent = '';
+        const titleEl = document.createElement('strong');
+        titleEl.className = 'title';
+        titleEl.textContent = enteredTitle;
+        metaEl.appendChild(titleEl);
+        if (originalMeta) {
+          metaEl.appendChild(document.createTextNode(' · ' + originalMeta));
+        }
+      }
+
       uploadBtn.textContent = '✓ Uploaded';
       uploadBtn.disabled = false;
       uploadBtn.className = 'primary';
       setTimeout(() => {
+        uploadBtn = swapHandler(uploadBtn, () => window.open(res.url, '_blank'));
         uploadBtn.textContent = 'Open';
-        uploadBtn.onclick = () => window.open(res.url, '_blank');
+        uploadBtn.className = 'primary';
       }, 1200);
 
+      discardBtn = swapHandler(discardBtn, () => window.close());
       discardBtn.textContent = 'Close';
       discardBtn.className = 'ghost';
       discardBtn.disabled = false;
-      discardBtn.onclick = () => window.close();
 
-      downloadBtn.textContent = 'Copy Link';
-      downloadBtn.className = 'secondary';
+      // Download keeps its original behavior — don't morph it.
       downloadBtn.disabled = false;
-      downloadBtn.onclick = async () => {
+
+      // Insert a new Copy Link button between Download and Upload.
+      const copyBtn = document.createElement('button');
+      copyBtn.textContent = 'Copy Link';
+      copyBtn.className = 'secondary';
+      copyBtn.addEventListener('click', async () => {
         try {
           await navigator.clipboard.writeText(res.url);
-          downloadBtn.textContent = '✓ Copied!';
-          setTimeout(() => { downloadBtn.textContent = 'Copy Link'; }, 2000);
+          copyBtn.textContent = '✓ Copied!';
+          setTimeout(() => { copyBtn.textContent = 'Copy Link'; }, 2000);
         } catch {
           setStatus('Failed to copy', 'err');
         }
-      };
+      });
+      downloadBtn.insertAdjacentElement('afterend', copyBtn);
 
       setStatus('✓ Uploaded & copied to clipboard!', 'ok');
     } else {
@@ -254,11 +292,19 @@ async function renderScreenshot(state: PreviewState): Promise<void> {
   img.src = state.dataUrl;
   await new Promise<void>((resolve) => { img.onload = () => resolve(); });
 
-  // Wait a frame for layout to settle, then size canvas to fill available width
+  // Wait a frame for layout to settle, then size canvas to fit BOTH width
+  // and height of the container so the toolbar above and bottom-bar below
+  // stay visible. Without the height clamp, tall page screenshots push the
+  // Upload/Download/Discard buttons + title input off-screen.
   await new Promise(r => requestAnimationFrame(r));
   const container = document.getElementById('canvas-wrap')!;
   const maxW = Math.min(920, container.clientWidth);
-  const scale = Math.min(maxW / img.naturalWidth, 1);
+  const maxH = container.clientHeight;
+  const scale = Math.min(
+    maxW / img.naturalWidth,
+    maxH / img.naturalHeight,
+    1,
+  );
   const canvasW = Math.round(img.naturalWidth * scale);
   const canvasH = Math.round(img.naturalHeight * scale);
 
@@ -301,12 +347,29 @@ async function renderScreenshot(state: PreviewState): Promise<void> {
     'tool-text': 'text',
   };
 
+  // Make every existing object click-through whenever a drawing tool is
+  // active. Without this, clicking an existing shape mid-draw auto-selects
+  // it (Fabric default), and the next drag resizes that object instead of
+  // creating a new one — turning "draw a rectangle next to this arrow" into
+  // "stretch the arrow into the new shape's bounds".
+  function applyToolInteractivity(): void {
+    const interactive = currentTool === 'select';
+    fabricCanvas.getObjects().forEach((obj) => {
+      obj.selectable = interactive;
+      obj.evented = interactive;
+    });
+    fabricCanvas.requestRenderAll();
+  }
+
   function setTool(tool: Tool): void {
     currentTool = tool;
     fabricCanvas.isDrawingMode = tool === 'draw';
     fabricCanvas.selection = tool === 'select';
     // Deselect objects when switching tools
     if (tool !== 'select') fabricCanvas.discardActiveObject();
+    // Lock/unlock existing objects so drawing tools never accidentally
+    // resize the previously-selected shape.
+    applyToolInteractivity();
     // Update active states
     Object.entries(toolIds).forEach(([id, t]) => {
       document.getElementById(id)?.classList.toggle('active', t === tool);
@@ -429,12 +492,19 @@ async function renderScreenshot(state: PreviewState): Promise<void> {
         fabricCanvas.add(arrowHead);
       }
       saveState();
+      // Newly-created shape inherits Fabric's selectable/evented defaults.
+      // Apply the current tool's interactivity so the next drag in this
+      // same tool starts another fresh shape instead of resizing this one.
+      applyToolInteractivity();
       activeShape = null;
       isDrawingShape = false;
     }
   });
 
-  fabricCanvas.on('path:created', () => saveState());
+  fabricCanvas.on('path:created', () => {
+    saveState();
+    applyToolInteractivity();
+  });
 
   // Undo / Redo
   document.getElementById('tool-undo')!.addEventListener('click', () => {
@@ -442,6 +512,11 @@ async function renderScreenshot(state: PreviewState): Promise<void> {
     redoStack.push(undoStack.pop()!);
     fabricCanvas.loadFromJSON(JSON.parse(undoStack[undoStack.length - 1])).then(() => {
       fabricCanvas.renderAll();
+      // Restored objects come back with their JSON-serialized selectable
+      // flags — re-apply the current tool's lock so they're not draggable
+      // mid-draw.
+      applyToolInteractivity();
+      scheduleMetaUpdate();
     });
   });
   document.getElementById('tool-redo')!.addEventListener('click', () => {
@@ -450,12 +525,53 @@ async function renderScreenshot(state: PreviewState): Promise<void> {
     undoStack.push(json);
     fabricCanvas.loadFromJSON(JSON.parse(json)).then(() => {
       fabricCanvas.renderAll();
+      applyToolInteractivity();
+      scheduleMetaUpdate();
     });
   });
   document.getElementById('tool-clear')!.addEventListener('click', () => {
     fabricCanvas.getObjects().forEach((obj) => fabricCanvas.remove(obj));
     fabricCanvas.renderAll();
     saveState();
+    scheduleMetaUpdate();
+  });
+
+  // Delete / Backspace removes the active selection. Works for a single
+  // object click, a shift-click multi-select, and a marquee multi-select —
+  // anything Fabric exposes via getActiveObject() / ActiveSelection.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+
+    // Don't steal the keypress from form fields (title input, etc.).
+    const target = e.target as HTMLElement | null;
+    const tag = target?.tagName;
+    if (
+      tag === 'INPUT' ||
+      tag === 'TEXTAREA' ||
+      tag === 'SELECT' ||
+      target?.isContentEditable
+    ) {
+      return;
+    }
+
+    const active = fabricCanvas.getActiveObject();
+    if (!active) return;
+    // Inside an IText being typed into — let the keystroke edit the text
+    // rather than deleting the whole text object.
+    if ((active as { isEditing?: boolean }).isEditing) return;
+
+    // getActiveObjects() flattens both single-select and ActiveSelection
+    // (multi-select) into a plain array, so we don't have to special-case
+    // the group wrapper.
+    const items = fabricCanvas.getActiveObjects();
+    if (items.length === 0) return;
+
+    fabricCanvas.discardActiveObject();
+    fabricCanvas.remove(...items);
+    fabricCanvas.requestRenderAll();
+    saveState();
+    scheduleMetaUpdate();
+    e.preventDefault();
   });
 
   // --- Export flattened image at full resolution ---
@@ -471,6 +587,37 @@ async function renderScreenshot(state: PreviewState): Promise<void> {
     return exportCanvas.toDataURL('image/png');
   }
 
+  // Live-track the actual export size. The state.bytes captured at recording
+  // time is the raw screenshot; the file the user actually downloads /
+  // uploads is the re-encoded PNG with annotations baked in, which is
+  // typically 2-4× larger. Showing state.bytes was misleading — header read
+  // 79 KB while the downloaded file was 327 KB. Recompute on every canvas
+  // change (debounced) so the header reflects what's about to be saved.
+  let isUploaded = false;
+  let metaSizeTimer: number | undefined;
+  async function refreshMetaSize(): Promise<void> {
+    if (isUploaded) return;
+    try {
+      const dataUrl = exportAnnotatedImage();
+      const blob = await (await fetch(dataUrl)).blob();
+      if (isUploaded) return;
+      metaEl.textContent = fmtSize(blob.size);
+    } catch {
+      /* keep prior value */
+    }
+  }
+  function scheduleMetaUpdate(): void {
+    if (isUploaded) return;
+    if (metaSizeTimer !== undefined) window.clearTimeout(metaSizeTimer);
+    metaSizeTimer = window.setTimeout(() => { void refreshMetaSize(); }, 300);
+  }
+  // Replace the initial raw-bytes display with the real export size.
+  void refreshMetaSize();
+  fabricCanvas.on('object:added', scheduleMetaUpdate);
+  fabricCanvas.on('object:modified', scheduleMetaUpdate);
+  fabricCanvas.on('object:removed', scheduleMetaUpdate);
+  fabricCanvas.on('path:created', scheduleMetaUpdate);
+
   // --- Upload / Download / Discard ---
   const statusEl = document.getElementById('status');
   const setStatus = (text: string, cls: 'ok' | 'err' | '' = '') => {
@@ -479,9 +626,20 @@ async function renderScreenshot(state: PreviewState): Promise<void> {
     statusEl.className = 'status' + (cls ? ' ' + cls : '');
   };
   const titleInput = document.getElementById('title') as HTMLInputElement;
-  const discardBtn = document.getElementById('discard') as HTMLButtonElement;
+  let discardBtn = document.getElementById('discard') as HTMLButtonElement;
   const downloadBtn = document.getElementById('download') as HTMLButtonElement;
-  const uploadBtn = document.getElementById('upload') as HTMLButtonElement;
+  let uploadBtn = document.getElementById('upload') as HTMLButtonElement;
+
+  // Replace a button so all previously-attached listeners are dropped — the
+  // post-upload state rebinds these buttons, and a stale download/discard
+  // handler firing alongside a new "Copy Link" / "Close" handler caused the
+  // "Copy Link" click to also trigger a file download.
+  const swapHandler = (btn: HTMLButtonElement, onClick: (e: MouseEvent) => void): HTMLButtonElement => {
+    const fresh = btn.cloneNode(true) as HTMLButtonElement;
+    btn.replaceWith(fresh);
+    fresh.addEventListener('click', onClick);
+    return fresh;
+  };
 
   discardBtn.addEventListener('click', async () => {
     await chrome.runtime.sendMessage({ kind: 'bg:preview-discard' });
@@ -515,31 +673,62 @@ async function renderScreenshot(state: PreviewState): Promise<void> {
         await navigator.clipboard.writeText(res.url);
       } catch { /* ignore */ }
 
+      // Lock the live meta refresh — file is uploaded, further canvas edits
+      // shouldn't change the displayed size or overwrite the title.
+      isUploaded = true;
+      if (metaSizeTimer !== undefined) window.clearTimeout(metaSizeTimer);
+
+      // Title is finalized — lock the input so the user can still read what
+      // they entered but can no longer edit it.
+      titleInput.readOnly = true;
+      titleInput.classList.add('readonly');
+
+      // Surface the entered title in the header so the user clearly sees
+      // "this image is titled X" alongside the file metadata.
+      const enteredTitle = titleInput.value.trim();
+      if (enteredTitle) {
+        const originalMeta = metaEl.textContent ?? '';
+        metaEl.textContent = '';
+        const titleEl = document.createElement('strong');
+        titleEl.className = 'title';
+        titleEl.textContent = enteredTitle;
+        metaEl.appendChild(titleEl);
+        if (originalMeta) {
+          metaEl.appendChild(document.createTextNode(' · ' + originalMeta));
+        }
+      }
+
       uploadBtn.textContent = '✓ Uploaded';
       uploadBtn.disabled = false;
       uploadBtn.className = 'primary';
       setTimeout(() => {
+        uploadBtn = swapHandler(uploadBtn, () => window.open(res.url, '_blank'));
         uploadBtn.textContent = 'Open';
-        uploadBtn.onclick = () => window.open(res.url, '_blank');
+        uploadBtn.className = 'primary';
       }, 1200);
 
+      discardBtn = swapHandler(discardBtn, () => window.close());
       discardBtn.textContent = 'Close';
       discardBtn.className = 'ghost';
       discardBtn.disabled = false;
-      discardBtn.onclick = () => window.close();
 
-      downloadBtn.textContent = 'Copy Link';
-      downloadBtn.className = 'secondary';
+      // Download keeps its original behavior — don't morph it.
       downloadBtn.disabled = false;
-      downloadBtn.onclick = async () => {
+
+      // Insert a new Copy Link button between Download and Upload.
+      const copyBtn = document.createElement('button');
+      copyBtn.textContent = 'Copy Link';
+      copyBtn.className = 'secondary';
+      copyBtn.addEventListener('click', async () => {
         try {
           await navigator.clipboard.writeText(res.url);
-          downloadBtn.textContent = '✓ Copied!';
-          setTimeout(() => { downloadBtn.textContent = 'Copy Link'; }, 2000);
+          copyBtn.textContent = '✓ Copied!';
+          setTimeout(() => { copyBtn.textContent = 'Copy Link'; }, 2000);
         } catch {
           setStatus('Failed to copy', 'err');
         }
-      };
+      });
+      downloadBtn.insertAdjacentElement('afterend', copyBtn);
     } else {
       uploadBtn.textContent = 'Upload';
       uploadBtn.disabled = false;

@@ -41,6 +41,7 @@
       .brand img { height: 22px; width: auto; }
       .brand-name { font-weight: 700; font-size: 15px; letter-spacing: -0.3px; }
       .meta { color: var(--muted); font-size: 12px; }
+      .meta .title { color: var(--fg); font-weight: 600; margin-right: 2px; }
       main {
         max-width: 960px;
         margin: 0 auto;
@@ -78,6 +79,15 @@
         font-size: 13px;
       }
       input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+      input.readonly,
+      input[readonly] {
+        background: var(--surface);
+        color: var(--muted);
+        cursor: default;
+        opacity: 0.85;
+      }
+      input.readonly:focus,
+      input[readonly]:focus { outline: none; }
       .row { display: flex; gap: 8px; flex-wrap: wrap; }
       .row.right { justify-content: flex-end; }
       button {

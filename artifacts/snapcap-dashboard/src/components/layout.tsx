@@ -30,7 +30,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="flex flex-col h-screen w-full bg-background text-foreground overflow-hidden">
+      <div className="flex flex-col h-screen w-full text-foreground overflow-hidden">
         {/* Top bar — full width, always on top */}
         <header className="shrink-0 h-14 border-b border-border bg-card flex items-center justify-between px-4 z-40">
           <div className="flex items-center gap-12">

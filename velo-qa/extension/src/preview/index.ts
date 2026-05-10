@@ -1,13 +1,16 @@
 // Preview page — opens in its own tab after a recording stops. Reads the
-// blob from the background (where it's held in memory as the "pending
-// preview"), plays it, and lets the user upload / download / discard.
+// video from IndexedDB (instant) or Azure SAS URL (fallback), and lets
+// the user upload / download / discard.
 //
 // Running in extension-origin context means no page CSP applies, which
 // fixes the "Preview playback failed" seen when the old in-page modal
 // tried to play blob:/data: URLs on CSP-locked sites.
 
 interface PreviewState {
-  dataUrl: string;
+  /** Read-only SAS URL for video/image playback from Azure */
+  readSasUrl: string;
+  /** Screenshot-only: data URL for local Fabric.js annotation */
+  screenshotDataUrl?: string;
   mimeType?: string;
   mediaType?: 'video' | 'screenshot';
   durationMs: number;
@@ -41,12 +44,6 @@ function renderEmpty(message: string): void {
   main.innerHTML = `<div class="empty">${message}</div>`;
 }
 
-async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
-  // fetch works for data: URIs in extension origin.
-  const res = await fetch(dataUrl);
-  return res.blob();
-}
-
 /**
  * Fix MediaRecorder's "duration: Infinity" bug. WebMs produced by
  * MediaRecorder don't embed a Duration element in the EBML header, so
@@ -75,12 +72,21 @@ function render(state: PreviewState): void {
   console.log('[velocap/preview] rendering', {
     bytes: state.bytes,
     durationMs: state.durationMs,
-    dataUrlLen: state.dataUrl?.length,
+    readSasUrl: state.readSasUrl ? '(present)' : '(missing)',
     mime: state.mimeType,
   });
 
+  const durationMs = state.durationMs || 1;
+  let trimStartMs = 0;
+  let trimEndMs = durationMs;
+
   main.innerHTML = `
-    <video id="video" controls autoplay playsinline></video>
+    <div class="player-wrap" id="player-wrap">
+      <video id="video" controls autoplay playsinline></video>
+    </div>
+    <div class="trim-info" id="trim-info">
+      <span class="trim-badge" id="trim-badge">✂ Full video</span>
+    </div>
     <div class="card">
       <div>
         <label for="title">Title (optional)</label>
@@ -95,23 +101,209 @@ function render(state: PreviewState): void {
     </div>
   `;
 
+  // Inject integrated trim overlay styles
+  if (!document.getElementById('trim-styles')) {
+    const trimStyle = document.createElement('style');
+    trimStyle.id = 'trim-styles';
+    trimStyle.textContent = `
+      .player-wrap { position: relative; border-radius: 10px; overflow: visible; }
+      .trim-info {
+        display: flex; align-items: center; justify-content: center;
+        padding: 6px 0; min-height: 24px;
+      }
+      .trim-badge {
+        font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace;
+        background: var(--surface); border: 1px solid var(--border);
+        padding: 2px 10px; border-radius: 20px;
+      }
+      .trim-badge.active { color: var(--accent); border-color: var(--accent); background: rgba(124,58,237,0.08); }
+
+      /* Trim overlay on the Plyr progress bar */
+      .plyr__progress { position: relative !important; }
+      .trim-overlay {
+        position: absolute; top: -8px; left: 0; right: 0; bottom: -8px;
+        pointer-events: none; z-index: 10;
+      }
+      .trim-overlay-left, .trim-overlay-right {
+        position: absolute; top: 0; bottom: 0;
+        background: rgba(0,0,0,0.45); pointer-events: none;
+        transition: width 0.05s ease;
+      }
+      .trim-overlay-left { left: 0; border-radius: 4px 0 0 4px; }
+      .trim-overlay-right { right: 0; border-radius: 0 4px 4px 0; }
+
+      .trim-handle {
+        position: absolute; top: -4px; bottom: -4px; width: 10px;
+        background: var(--accent); border-radius: 3px; cursor: col-resize;
+        pointer-events: auto; z-index: 11;
+        display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 0 4px rgba(124,58,237,0.4);
+        transition: background 0.15s;
+      }
+      .trim-handle:hover, .trim-handle.dragging { background: var(--accent-hover); }
+      .trim-handle::after {
+        content: ''; width: 2px; height: 10px;
+        background: rgba(255,255,255,0.7); border-radius: 1px;
+      }
+      .trim-handle-start { transform: translateX(-50%); }
+      .trim-handle-end { transform: translateX(50%); }
+
+      .trim-time-tooltip {
+        position: absolute; top: -26px; left: 50%; transform: translateX(-50%);
+        background: var(--fg); color: var(--bg); font-size: 10px;
+        font-family: ui-monospace, monospace; padding: 2px 6px;
+        border-radius: 4px; white-space: nowrap; pointer-events: none;
+        opacity: 0; transition: opacity 0.15s;
+      }
+      .trim-handle.dragging .trim-time-tooltip,
+      .trim-handle:hover .trim-time-tooltip { opacity: 1; }
+    `;
+    document.head.appendChild(trimStyle);
+  }
+
   const video = document.getElementById('video') as HTMLVideoElement;
   enableScrubbingFor(video);
-  void dataUrlToBlob(state.dataUrl)
-    .then((blob) => {
-      console.log('[velocap/preview] blob ready', blob.size, blob.type);
-      const objectUrl = URL.createObjectURL(blob);
-      video.src = objectUrl;
-      video.load();
-      window.addEventListener('beforeunload', () => URL.revokeObjectURL(objectUrl));
-    })
-    .catch((e) => {
-      console.error('[velocap/preview] blob conversion failed', e);
-      // Fall back to the raw data URL — less robust, but extension-origin
-      // pages can usually play data: URLs.
-      video.src = state.dataUrl;
-      video.load();
+  const trimBadge = document.getElementById('trim-badge') as HTMLElement;
+
+  // Initialize Plyr, then inject trim handles into the progress bar
+  void (async () => {
+    try {
+      const { default: Plyr } = await import('plyr');
+      const plyrCss = await import('plyr/dist/plyr.css?inline');
+      const style = document.createElement('style');
+      style.textContent = plyrCss.default;
+      document.head.appendChild(style);
+
+      const knownSec = Math.max(1, Math.round(state.durationMs / 1000));
+      new Plyr(video, {
+        controls: ['play', 'progress', 'current-time', 'mute', 'volume', 'fullscreen'],
+        duration: knownSec,
+      });
+
+      // Wait for Plyr to render, then inject trim handles into the progress bar
+      await new Promise((r) => setTimeout(r, 200));
+      const progressContainer = document.querySelector('.plyr__progress') as HTMLElement;
+      if (progressContainer) {
+        initTrimOverlay(progressContainer);
+      }
+    } catch {
+      // Plyr failed — native controls, no trim overlay
+    }
+  })();
+
+  function initTrimOverlay(container: HTMLElement): void {
+    // Create overlay elements
+    const overlay = document.createElement('div');
+    overlay.className = 'trim-overlay';
+
+    const leftDim = document.createElement('div');
+    leftDim.className = 'trim-overlay-left';
+    const rightDim = document.createElement('div');
+    rightDim.className = 'trim-overlay-right';
+
+    const startHandle = document.createElement('div');
+    startHandle.className = 'trim-handle trim-handle-start';
+    startHandle.innerHTML = '<span class="trim-time-tooltip" id="tt-start">0:00</span>';
+
+    const endHandle = document.createElement('div');
+    endHandle.className = 'trim-handle trim-handle-end';
+    endHandle.innerHTML = `<span class="trim-time-tooltip" id="tt-end">${fmtDuration(durationMs)}</span>`;
+
+    overlay.appendChild(leftDim);
+    overlay.appendChild(rightDim);
+    overlay.appendChild(startHandle);
+    overlay.appendChild(endHandle);
+    container.style.position = 'relative';
+    container.appendChild(overlay);
+
+    const ttStart = document.getElementById('tt-start')!;
+    const ttEnd = document.getElementById('tt-end')!;
+
+    function updateOverlay(): void {
+      const startPct = (trimStartMs / durationMs) * 100;
+      const endPct = (trimEndMs / durationMs) * 100;
+      leftDim.style.width = `${startPct}%`;
+      rightDim.style.width = `${100 - endPct}%`;
+      startHandle.style.left = `${startPct}%`;
+      endHandle.style.right = `${100 - endPct}%`;
+      ttStart.textContent = fmtDuration(trimStartMs);
+      ttEnd.textContent = fmtDuration(trimEndMs);
+      const isFull = trimStartMs === 0 && trimEndMs >= durationMs - 100;
+      trimBadge.textContent = isFull ? '✂ Full video' : `✂ ${fmtDuration(trimStartMs)} – ${fmtDuration(trimEndMs)}`;
+      trimBadge.classList.toggle('active', !isFull);
+    }
+    updateOverlay();
+
+    // Drag logic for handles
+    function makeDraggable(handle: HTMLElement, onDrag: (pct: number) => void): void {
+      let dragging = false;
+
+      handle.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dragging = true;
+        handle.classList.add('dragging');
+      });
+
+      document.addEventListener('mousemove', (e) => {
+        if (!dragging) return;
+        const rect = container.getBoundingClientRect();
+        const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        onDrag(pct);
+        updateOverlay();
+      });
+
+      document.addEventListener('mouseup', () => {
+        if (dragging) {
+          dragging = false;
+          handle.classList.remove('dragging');
+        }
+      });
+    }
+
+    makeDraggable(startHandle, (pct) => {
+      trimStartMs = Math.min(Math.round(pct * durationMs / 100) * 100, trimEndMs - 500);
+      video.currentTime = trimStartMs / 1000;
     });
+
+    makeDraggable(endHandle, (pct) => {
+      trimEndMs = Math.max(Math.round(pct * durationMs / 100) * 100, trimStartMs + 500);
+      video.currentTime = trimEndMs / 1000;
+    });
+  }
+
+  // Try IndexedDB first (instant), fall back to Azure SAS URL
+  void (async () => {
+    try {
+      const { loadBlob } = await import('../shared/indexeddb.js');
+      const cached = await loadBlob('pending-recording');
+      if (cached) {
+        const objectUrl = URL.createObjectURL(cached);
+        video.src = objectUrl;
+        video.load();
+        window.addEventListener('beforeunload', () => URL.revokeObjectURL(objectUrl));
+        console.log('[velocap/preview] loaded from IndexedDB (instant)', cached.size);
+        return;
+      }
+    } catch (e) {
+      console.warn('[velocap/preview] IndexedDB load failed, using Azure URL', e);
+    }
+    video.src = state.readSasUrl;
+    video.load();
+    console.log('[velocap/preview] loaded from Azure SAS URL (fallback)');
+  })();
+
+  // Enforce trim bounds during playback
+  video.addEventListener('timeupdate', () => {
+    if (video.currentTime < trimStartMs / 1000 - 0.1) {
+      video.currentTime = trimStartMs / 1000;
+    }
+    if (trimEndMs < durationMs && video.currentTime >= trimEndMs / 1000) {
+      video.pause();
+      video.currentTime = trimStartMs / 1000;
+    }
+  });
+
   video.addEventListener('error', () => {
     console.error('[velocap/preview] video error', video.error);
     setStatus(
@@ -137,24 +329,19 @@ function render(state: PreviewState): void {
   });
 
   downloadBtn.addEventListener('click', async () => {
-    // Route through the background's chrome.downloads call — the direct
-    // <a download> path in iframes can be blocked depending on the host
-    // page's origin, and the background's download API always works
-    // because it runs outside the iframe sandbox.
+    // Route through the background's chrome.downloads call — uses the
+    // readSasUrl directly. Falls back to opening the URL in a new tab.
     setStatus('Preparing download…');
     const res = await chrome.runtime.sendMessage({ kind: 'bg:download-preview' });
     if (res?.ok) {
       setStatus('✓ Download started', 'ok');
     } else {
-      // Fall back to the local blob-url download if chrome.downloads refuses.
+      // Fall back: open the SAS URL directly — browser will download it.
       try {
-        const blob = await dataUrlToBlob(state.dataUrl);
-        const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url;
+        a.href = state.readSasUrl;
         a.download = `velocap-${Date.now()}.webm`;
         a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
         setStatus('✓ Download started (fallback)', 'ok');
       } catch (e) {
         setStatus(`Download failed: ${res?.message ?? (e instanceof Error ? e.message : String(e))}`, 'err');
@@ -168,9 +355,11 @@ function render(state: PreviewState): void {
     discardBtn.disabled = true;
     downloadBtn.disabled = true;
 
+    const isTrimmed = trimStartMs > 0 || trimEndMs < durationMs - 100;
     const res = await chrome.runtime.sendMessage({
       kind: 'bg:preview-upload',
       title: titleInput.value.trim() || undefined,
+      ...(isTrimmed ? { trimStartMs, trimEndMs } : {}),
     });
 
     if (res?.ok) {
@@ -221,6 +410,9 @@ function render(state: PreviewState): void {
 async function renderScreenshot(state: PreviewState): Promise<void> {
   const fabric = await import('fabric');
 
+  // Use local screenshotDataUrl for annotation canvas (Fabric.js needs data URL)
+  const imgSrc = state.screenshotDataUrl || state.readSasUrl;
+
   metaEl.textContent = fmtSize(state.bytes);
 
   main.innerHTML = `
@@ -251,7 +443,8 @@ async function renderScreenshot(state: PreviewState): Promise<void> {
 
   // Load image to get natural dimensions
   const img = new Image();
-  img.src = state.dataUrl;
+  img.crossOrigin = 'anonymous'; // needed if loading from Azure SAS URL
+  img.src = imgSrc;
   await new Promise<void>((resolve) => { img.onload = () => resolve(); });
 
   // Wait a frame for layout to settle, then size canvas to fill available width
@@ -489,9 +682,9 @@ async function renderScreenshot(state: PreviewState): Promise<void> {
   });
 
   downloadBtn.addEventListener('click', () => {
-    const dataUrl = exportAnnotatedImage();
+    const annotatedDataUrl = exportAnnotatedImage();
     const a = document.createElement('a');
-    a.href = dataUrl;
+    a.href = annotatedDataUrl;
     a.download = `velocap-${Date.now()}.png`;
     a.click();
     setStatus('Download started', 'ok');
@@ -571,15 +764,15 @@ const origClose = window.close.bind(window);
 };
 
 void (async () => {
-  const state = (await chrome.runtime.sendMessage({ kind: 'bg:get-pending-preview' })) as
-    | PreviewState
+  const raw = (await chrome.runtime.sendMessage({ kind: 'bg:get-pending-preview' })) as
+    | (PreviewState & { empty?: never })
     | { empty: true }
     | undefined;
-  if (!state || (state as { empty?: boolean }).empty) {
+  if (!raw || raw.empty) {
     renderEmpty('Nothing to preview — the recording was already uploaded or discarded.');
     return;
   }
-  const preview = state as PreviewState;
+  const preview = raw as PreviewState;
   if (preview.mediaType === 'screenshot') {
     await renderScreenshot(preview);
   } else {

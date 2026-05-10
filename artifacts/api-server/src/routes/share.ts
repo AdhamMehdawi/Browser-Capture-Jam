@@ -33,6 +33,8 @@ router.get("/share/:token", async (req: any, res) => {
       thumbnailObjectPath: recording.thumbnailObjectPath,
       videoUrl: objectStorageService.getReadOnlySasUrl(recording.videoObjectPath),
       thumbnailUrl: objectStorageService.getReadOnlySasUrl(recording.thumbnailObjectPath),
+      trimStartMs: recording.trimStartMs,
+      trimEndMs: recording.trimEndMs,
       shareToken: recording.shareToken,
       tags: recording.tags,
       browserInfo: recording.browserInfo,

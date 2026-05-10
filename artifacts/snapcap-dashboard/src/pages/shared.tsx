@@ -259,7 +259,12 @@ export default function SharedRecordingViewer() {
                 {videoUrl ? (
                   <div className="w-full max-w-5xl">
                     <div className="rounded-lg shadow-lg bg-black">
-                      <StreamingVideoPlayer videoUrl={videoUrl} knownDurationMs={recording.duration} />
+                      <StreamingVideoPlayer
+                        videoUrl={videoUrl}
+                        knownDurationMs={recording.duration}
+                        trimStartMs={(recording as any).trimStartMs}
+                        trimEndMs={(recording as any).trimEndMs}
+                      />
                     </div>
                   </div>
                 ) : screenshotUrl ? (

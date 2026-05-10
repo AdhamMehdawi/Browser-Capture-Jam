@@ -5,6 +5,7 @@ import recordingsRouter from "./recordings";
 import userRouter from "./user";
 import shareRouter from "./share";
 import jamsRouter from "./jams";
+import uploadsRouter from "./uploads";
 
 const router: IRouter = Router();
 
@@ -17,5 +18,6 @@ router.use(shareRouter);
 router.use(recordingsRouter);
 router.use(userRouter);
 router.use(jamsRouter);
+router.use(uploadsRouter);
 
 export default router;

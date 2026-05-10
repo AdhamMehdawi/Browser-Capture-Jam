@@ -17,6 +17,17 @@ resource "azurerm_storage_account" "this" {
     container_delete_retention_policy {
       days = 7
     }
+
+    dynamic "cors_rule" {
+      for_each = length(var.cors_allowed_origins) > 0 ? [1] : []
+      content {
+        allowed_headers    = ["*"]
+        allowed_methods    = ["GET", "PUT", "HEAD", "OPTIONS"]
+        allowed_origins    = var.cors_allowed_origins
+        exposed_headers    = ["Content-Range", "Accept-Ranges", "Content-Length", "Content-Type", "x-ms-request-id"]
+        max_age_in_seconds = 3600
+      }
+    }
   }
 
   tags = var.tags

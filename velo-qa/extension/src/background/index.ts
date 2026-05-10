@@ -3,6 +3,8 @@
 // popup can be closed/reopened during a recording.
 
 import { api, ApiError } from '../shared/api.js';
+import { putBlobSingle } from '../shared/azure-upload.js';
+import { deleteBlob as deleteIndexedDBBlob } from '../shared/indexeddb.js';
 import { getAuth, setAuth } from '../shared/storage.js';
 import { MSG } from '../types.js';
 import type { AuthState, CapturePayload } from '../types.js';
@@ -35,26 +37,42 @@ type BgState =
       mode: RecordMode;
       /** Context captured at the start of recording - we'll merge with end context. */
       startContext: CapturePayload | null;
+      /** Azure streaming upload state */
+      objectPath: string;
+      uploadSasUrl: string;
+      readSasUrl: string;
     }
-  | { kind: 'processing'; workspaceId: string; startContext: CapturePayload | null }
+  | {
+      kind: 'processing';
+      workspaceId: string;
+      startContext: CapturePayload | null;
+      objectPath: string;
+      uploadSasUrl: string;
+      readSasUrl: string;
+    }
   /**
-   * Recording finished, blob captured, user hasn't decided yet. Data lives
-   * in memory until they click Upload or Discard in the preview modal.
+   * Recording finished and committed to Azure. User hasn't decided yet.
+   * No binary data in memory — video plays from readSasUrl.
    */
   | {
       kind: 'pending-preview';
       workspaceId: string;
       tabId: number;
-      dataUrl: string;
+      /** Azure object path (e.g. /objects/<uuid>.webm) */
+      objectPath: string;
+      /** Read-only SAS URL for video playback */
+      readSasUrl: string;
       durationMs: number;
       bytes: number;
       note?: string;
       /** Context captured during recording - merged start + end. */
       capturedContext: CapturePayload | null;
-      /** JPEG thumbnail captured at recording stop. */
-      thumbnailDataUrl: string | null;
+      /** Azure object path for thumbnail (uploaded via SAS) */
+      thumbnailObjectPath: string | null;
       /** Whether this is a video or screenshot preview. */
       mediaType: 'video' | 'screenshot';
+      /** Screenshot-only: data URL for local annotation before upload */
+      screenshotDataUrl?: string;
     };
 
 let state: BgState = { kind: 'idle' };
@@ -71,13 +89,15 @@ async function persistPendingPreview(): Promise<void> {
   const data = {
     workspaceId: state.workspaceId,
     tabId: state.tabId,
-    dataUrl: state.dataUrl,
+    objectPath: state.objectPath,
+    readSasUrl: state.readSasUrl,
     durationMs: state.durationMs,
     bytes: state.bytes,
     note: state.note,
     capturedContext: state.capturedContext,
-    thumbnailDataUrl: state.thumbnailDataUrl,
+    thumbnailObjectPath: state.thumbnailObjectPath,
     mediaType: state.mediaType,
+    screenshotDataUrl: state.screenshotDataUrl,
     savedAt: Date.now(),
   };
   await chrome.storage.local.set({ [PENDING_PREVIEW_STORAGE_KEY]: data });
@@ -88,7 +108,7 @@ async function persistPendingPreview(): Promise<void> {
 async function restorePendingPreview(): Promise<boolean> {
   const result = await chrome.storage.local.get(PENDING_PREVIEW_STORAGE_KEY);
   const data = result[PENDING_PREVIEW_STORAGE_KEY];
-  if (!data || !data.dataUrl) {
+  if (!data || !data.objectPath) {
     console.log('[velocap/bg] no pending preview in storage to restore');
     return false;
   }
@@ -102,16 +122,18 @@ async function restorePendingPreview(): Promise<boolean> {
     kind: 'pending-preview',
     workspaceId: data.workspaceId,
     tabId: data.tabId,
-    dataUrl: data.dataUrl,
+    objectPath: data.objectPath,
+    readSasUrl: data.readSasUrl,
     durationMs: data.durationMs,
     bytes: data.bytes,
     note: data.note,
     capturedContext: data.capturedContext,
-    thumbnailDataUrl: data.thumbnailDataUrl ?? null,
+    thumbnailObjectPath: data.thumbnailObjectPath ?? null,
     mediaType: data.mediaType ?? 'video',
+    screenshotDataUrl: data.screenshotDataUrl,
   };
   console.log('[velocap/bg] restored pending preview from storage', {
-    dataUrlLength: data.dataUrl.length,
+    objectPath: data.objectPath,
     durationMs: data.durationMs,
   });
   return true;
@@ -366,18 +388,26 @@ async function handleScreenshot(req: CaptureRequest): Promise<BgResponse> {
       ? 'No console/network — reload the page and reproduce before capturing.'
       : undefined;
 
-    const bytes = Math.round((screenshotDataUrl.length - 22) * 3 / 4);
+    // Init an upload session for the screenshot
+    const { objectPath, uploadSasUrl, readSasUrl } = await api.initUpload('png');
+
+    // Upload raw PNG to Azure (single PUT, no chunking)
+    const pngRes = await fetch(screenshotDataUrl);
+    const pngBlob = await pngRes.blob();
+    await putBlobSingle(uploadSasUrl, pngBlob, 'image/png');
 
     state = {
       kind: 'pending-preview',
       workspaceId: req.workspaceId,
       tabId: tab.id,
-      dataUrl: screenshotDataUrl,
+      objectPath,
+      readSasUrl,
       durationMs: 0,
-      bytes,
+      bytes: pngBlob.size,
       capturedContext: ctx,
-      thumbnailDataUrl: null,
+      thumbnailObjectPath: null,
       mediaType: 'screenshot',
+      screenshotDataUrl, // kept locally for Fabric.js annotation
       ...(note ? { note } : {}),
     };
 
@@ -387,10 +417,12 @@ async function handleScreenshot(req: CaptureRequest): Promise<BgResponse> {
     try {
       await chrome.tabs.sendMessage(tab.id, {
         kind: 'preview:show',
-        dataUrl: screenshotDataUrl,
+        screenshotDataUrl,
+        readSasUrl,
         durationMs: 0,
-        bytes,
+        bytes: pngBlob.size,
         mimeType: 'image/png',
+        mediaType: 'screenshot',
         note,
       });
     } catch {
@@ -434,6 +466,11 @@ async function handleRecordStart(req: RecordStartReq): Promise<BgResponse> {
     if (blocked) return blocked;
     console.log('[velocap/bg] target tab', { id: tab.id, url: tab.url });
 
+    // Initialize streaming upload session — get SAS URL before recording starts
+    console.log('[velocap/bg] initializing upload session');
+    const upload = await api.initUpload('webm');
+    console.log('[velocap/bg] upload session ready', { objectPath: upload.objectPath });
+
     let startPayload: Record<string, unknown>;
     if (req.mode === 'tab') {
       const streamId = await getTabStreamId(tab.id);
@@ -467,6 +504,7 @@ async function handleRecordStart(req: RecordStartReq): Promise<BgResponse> {
           kind: 'start',
           ...startPayload,
           mic: req.withMic,
+          uploadSasUrl: upload.uploadSasUrl,
         },
         (response) => {
           clearTimeout(timeout);
@@ -525,6 +563,9 @@ async function handleRecordStart(req: RecordStartReq): Promise<BgResponse> {
       windowId: tab.windowId,
       mode: req.mode,
       startContext,
+      objectPath: upload.objectPath,
+      uploadSasUrl: upload.uploadSasUrl,
+      readSasUrl: upload.readSasUrl,
     };
     console.log('[velocap/bg] state=recording');
     // Inject the floating recording bar on whatever tab the user was on —
@@ -558,39 +599,47 @@ async function handleRecordStop(): Promise<BgResponse> {
     return { ok: false, code: 'not_recording', message: 'Not currently recording' };
   }
   const prev = state;
-  state = { kind: 'processing', workspaceId: prev.workspaceId, startContext: prev.startContext };
+  state = {
+    kind: 'processing',
+    workspaceId: prev.workspaceId,
+    startContext: prev.startContext,
+    objectPath: prev.objectPath,
+    uploadSasUrl: prev.uploadSasUrl,
+    readSasUrl: prev.readSasUrl,
+  };
   pendingResult = null;
   await chrome.runtime.sendMessage({ target: 'offscreen', kind: 'stop' });
 
-  // Wait for the offscreen 'recorded' message, then upload.
+  // Wait for the offscreen 'upload-complete' message.
   return new Promise<BgResponse>((resolve) => {
     resultWaiters.push(resolve);
   });
 }
 
 /**
- * Offscreen finished encoding. Don't upload yet — hand the blob to the
- * content script's preview modal and wait for the user's decision.
+ * Offscreen finished recording and committed all blocks to Azure.
+ * Video is already in blob storage — no binary data passes through here.
+ * Show the preview modal and wait for the user's decision.
  */
-async function onRecordedFromOffscreen(msg: {
-  dataUrl: string;
+async function onUploadCompleteFromOffscreen(msg: {
   durationMs: number;
   bytes: number;
+  blockCount: number;
   note?: string;
 }): Promise<void> {
-  console.log('[velocap/bg] recorded', {
+  console.log('[velocap/bg] upload-complete', {
     durationMs: msg.durationMs,
     bytes: msg.bytes,
+    blockCount: msg.blockCount,
     note: msg.note,
   });
   try {
     if (state.kind !== 'processing') {
-      console.warn('[velocap/bg] recorded delivered in state', state.kind);
-      resolveResult({ ok: false, code: 'unexpected_state', message: 'Recorder delivered out of band' });
+      console.warn('[velocap/bg] upload-complete delivered in state', state.kind);
+      resolveResult({ ok: false, code: 'unexpected_state', message: 'Upload complete delivered out of band' });
       return;
     }
-    const workspaceId = state.workspaceId;
-    const startContext = state.startContext;
+    const { workspaceId, startContext, objectPath, readSasUrl } = state;
     const tab = await activeTab().catch(() => null);
     const tabId = tab?.id ?? null;
 
@@ -649,21 +698,28 @@ async function onRecordedFromOffscreen(msg: {
       capturedContext = startContext;
     }
 
-    // Capture thumbnail as JPEG (~100-200KB vs 3-4MB PNG on Retina)
-    let thumbnailDataUrl: string | null = null;
+    // Capture thumbnail and upload to Azure via SAS
+    let thumbnailObjectPath: string | null = null;
     if (tabId != null) {
       try {
-        const tab = await chrome.tabs.get(tabId);
-        thumbnailDataUrl = await new Promise<string>((resolve, reject) => {
-          chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 70 }, (dataUrl) => {
+        const tabInfo = await chrome.tabs.get(tabId);
+        const thumbDataUrl = await new Promise<string>((resolve, reject) => {
+          chrome.tabs.captureVisibleTab(tabInfo.windowId, { format: 'jpeg', quality: 70 }, (dataUrl) => {
             const err = chrome.runtime.lastError;
             if (err || !dataUrl) return reject(new Error(err?.message ?? 'Thumbnail failed'));
             resolve(dataUrl);
           });
         });
-        console.log('[velocap/bg] captured thumbnail', { length: thumbnailDataUrl.length });
+        console.log('[velocap/bg] captured thumbnail', { length: thumbDataUrl.length });
+        // Upload thumbnail to Azure
+        const thumbUpload = await api.initUpload('jpg');
+        const thumbRes = await fetch(thumbDataUrl);
+        const thumbBlob = await thumbRes.blob();
+        await putBlobSingle(thumbUpload.uploadSasUrl, thumbBlob, 'image/jpeg');
+        thumbnailObjectPath = thumbUpload.objectPath;
+        console.log('[velocap/bg] thumbnail uploaded', { thumbnailObjectPath });
       } catch (e) {
-        console.warn('[velocap/bg] thumbnail capture failed', e);
+        console.warn('[velocap/bg] thumbnail capture/upload failed', e);
       }
     }
 
@@ -671,11 +727,12 @@ async function onRecordedFromOffscreen(msg: {
       kind: 'pending-preview',
       workspaceId,
       tabId: tabId ?? -1,
-      dataUrl: msg.dataUrl,
+      objectPath,
+      readSasUrl,
       durationMs: msg.durationMs,
       bytes: msg.bytes,
       capturedContext,
-      thumbnailDataUrl,
+      thumbnailObjectPath,
       mediaType: 'video',
       ...(msg.note ? { note: msg.note } : {}),
     };
@@ -692,17 +749,16 @@ async function onRecordedFromOffscreen(msg: {
     resolveResult({ ok: true, id: '', url: '' });
 
     // Show the preview as an in-page popup (modal) on the recorded tab.
-    // The content script injects an <iframe> pointed at the extension-origin
-    // preview page, so CSP restrictions on the page don't affect video
-    // playback. Falls back to opening in a new tab if messaging fails.
+    // Video plays from readSasUrl — no binary data in this message.
     if (tabId != null) {
       try {
         await chrome.tabs.sendMessage(tabId, {
           kind: 'preview:show',
-          dataUrl: msg.dataUrl,
+          readSasUrl,
           durationMs: msg.durationMs,
           bytes: msg.bytes,
           mimeType: 'video/webm',
+          mediaType: 'video',
           note: msg.note,
         });
       } catch (e) {
@@ -722,10 +778,11 @@ async function onRecordedFromOffscreen(msg: {
 }
 
 /**
- * User clicked Upload in the preview modal. Package the buffered dataUrl
- * with the captured context (collected at start + end of recording) and POST to /jams.
+ * User clicked Upload in the preview modal. Video bytes are already in Azure.
+ * Send metadata only via POST /uploads/complete.
+ * For screenshots with annotations, re-upload the annotated PNG to the same objectPath.
  */
-async function uploadPendingPreview(req: { title?: string; annotatedDataUrl?: string }): Promise<BgResponse> {
+async function uploadPendingPreview(req: { title?: string; annotatedDataUrl?: string; trimStartMs?: number; trimEndMs?: number }): Promise<BgResponse> {
   console.log('[velocap/bg] uploadPendingPreview called, state.kind:', state.kind);
 
   // If state is idle, try to restore from storage (service worker may have restarted)
@@ -745,14 +802,11 @@ async function uploadPendingPreview(req: { title?: string; annotatedDataUrl?: st
   }
   const pending = state;
   console.log('[velocap/bg] uploadPendingPreview: pending state', {
-    hasDataUrl: !!pending.dataUrl,
-    dataUrlLength: pending.dataUrl?.length ?? 0,
+    objectPath: pending.objectPath,
     durationMs: pending.durationMs,
     bytes: pending.bytes,
   });
   try {
-    // Use the context we captured during recording, not fresh context
-    // (user may have navigated away, reloaded, etc.)
     const ctx = pending.capturedContext ?? fallbackContext({ url: '', title: '' } as chrome.tabs.Tab);
 
     console.log('[velocap/bg] uploadPendingPreview: using captured context', {
@@ -762,27 +816,38 @@ async function uploadPendingPreview(req: { title?: string; annotatedDataUrl?: st
     });
 
     const isScreenshot = pending.mediaType === 'screenshot';
-    const finalDataUrl = isScreenshot && req.annotatedDataUrl ? req.annotatedDataUrl : pending.dataUrl;
+    let objectPath = pending.objectPath;
 
-    const jam = await api.createJam({
-      workspaceId: pending.workspaceId,
-      type: isScreenshot ? 'SCREENSHOT' : 'VIDEO',
-      title: req.title ?? undefined,
+    // If screenshot was annotated, re-upload the annotated version
+    if (isScreenshot && req.annotatedDataUrl) {
+      const annotUpload = await api.initUpload('png');
+      const annotRes = await fetch(req.annotatedDataUrl);
+      const annotBlob = await annotRes.blob();
+      await putBlobSingle(annotUpload.uploadSasUrl, annotBlob, 'image/png');
+      // Delete the original un-annotated screenshot
+      void api.discardUpload(pending.objectPath).catch(() => {});
+      objectPath = annotUpload.objectPath;
+    }
+
+    // Metadata-only POST — no binary data
+    const result = await api.completeUpload({
+      objectPath,
+      ...(pending.thumbnailObjectPath ? { thumbnailObjectPath: pending.thumbnailObjectPath } : {}),
+      ...(req.title ? { title: req.title } : {}),
+      ...(req.trimStartMs != null ? { trimStartMs: req.trimStartMs } : {}),
+      ...(req.trimEndMs != null ? { trimEndMs: req.trimEndMs } : {}),
+      durationMs: pending.durationMs,
       page: ctx.page,
       device: ctx.device,
       console: ctx.console,
       network: ctx.network,
       actions: ctx.actions,
-      ...(isScreenshot ? {} : { durationMs: pending.durationMs }),
-      visibility: 'PUBLIC',
-      media: isScreenshot
-        ? { kind: 'screenshot', dataUrl: finalDataUrl }
-        : { kind: 'video', dataUrl: pending.dataUrl },
-      thumbnail: pending.thumbnailDataUrl ? { dataUrl: pending.thumbnailDataUrl } : undefined,
     });
+
     state = { kind: 'idle' };
     await clearPersistedPreview();
-    return { ok: true, id: jam.id, url: jam.url, ...(pending.note ? { note: pending.note } : {}) };
+    void deleteIndexedDBBlob('pending-recording').catch(() => {});
+    return { ok: true, id: result.id, url: result.url, ...(pending.note ? { note: pending.note } : {}) };
   } catch (e) {
     if (e instanceof ApiError) return { ok: false, code: e.code, message: e.message };
     return { ok: false, code: 'upload_failed', message: e instanceof Error ? e.message : String(e) };
@@ -790,7 +855,15 @@ async function uploadPendingPreview(req: { title?: string; annotatedDataUrl?: st
 }
 
 function discardPendingPreview(): void {
+  if (state.kind === 'pending-preview') {
+    // Delete the blob from Azure
+    void api.discardUpload(state.objectPath).catch(() => {});
+    if (state.thumbnailObjectPath) {
+      void api.discardUpload(state.thumbnailObjectPath).catch(() => {});
+    }
+  }
   state = { kind: 'idle' };
+  void deleteIndexedDBBlob('pending-recording').catch(() => {});
   void clearPersistedPreview();
 }
 
@@ -810,8 +883,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   // Messages from offscreen have `target: 'bg'`.
   if (msg?.target === 'bg') {
-    if (msg.kind === 'recorded') {
-      void onRecordedFromOffscreen(msg);
+    if (msg.kind === 'upload-complete') {
+      void onUploadCompleteFromOffscreen(msg);
       return false;
     }
     if (msg.kind === 'recorder-error') {
@@ -860,7 +933,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg?.kind === 'bg:preview-upload') {
-    void uploadPendingPreview({ title: msg.title, annotatedDataUrl: msg.annotatedDataUrl }).then(sendResponse);
+    void uploadPendingPreview({ title: msg.title, annotatedDataUrl: msg.annotatedDataUrl, trimStartMs: msg.trimStartMs, trimEndMs: msg.trimEndMs }).then(sendResponse);
     return true;
   }
   if (msg?.kind === 'bg:preview-discard') {
@@ -876,7 +949,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     console.log('[velocap/bg] get-pending-preview: returning', state.bytes, 'bytes');
     sendResponse({
-      dataUrl: state.dataUrl,
+      readSasUrl: state.readSasUrl,
+      screenshotDataUrl: state.screenshotDataUrl,
       durationMs: state.durationMs,
       bytes: state.bytes,
       mimeType: state.mediaType === 'screenshot' ? 'image/png' : 'video/webm',
@@ -895,7 +969,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     chrome.downloads.download(
       {
-        url: state.dataUrl,
+        url: state.readSasUrl,
         filename: `velocap-${Date.now()}.${state.mediaType === 'screenshot' ? 'png' : 'webm'}`,
         saveAs: true,
       },

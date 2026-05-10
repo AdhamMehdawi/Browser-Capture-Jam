@@ -6,7 +6,7 @@
 #     --file artifacts/api-server/Dockerfile .
 
 FROM node:24-alpine AS base
-RUN corepack enable
+RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /repo
 
 # ---------- deps + build ----------
@@ -15,13 +15,16 @@ FROM base AS build
 # .dockerignore excludes node_modules, dist, .terraform, etc.
 COPY . .
 
-RUN pnpm install --frozen-lockfile
+# --ignore-scripts: the root package.json preinstall hook validates the
+# package manager via $npm_config_user_agent, but corepack in Node 24
+# sets it differently. Safe to skip — we're already using pnpm.
+RUN pnpm install --frozen-lockfile --ignore-scripts
 RUN pnpm --filter @workspace/api-server run build
 
 # pnpm deploy extracts api-server + its prod deps into a flat, self-contained
 # directory with no symlinks — ideal for a thin runtime layer.
 # --legacy flag: pnpm v10 requires this unless the workspace uses injected deps.
-RUN pnpm --filter @workspace/api-server deploy --prod --legacy /out
+RUN pnpm --filter @workspace/api-server --ignore-scripts deploy --prod --legacy /out
 
 # ---------- runtime ----------
 FROM node:24-alpine AS runtime

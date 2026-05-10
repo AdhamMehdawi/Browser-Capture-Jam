@@ -57,11 +57,12 @@ resource "random_password" "postgres_admin" {
 # Data plane
 # -----------------------------------------------------------------------------
 module "storage" {
-  source              = "../../modules/storage-account"
-  name                = "velocapst${var.env}aue01"
-  resource_group_name = data.azurerm_resource_group.velocap.name
-  location            = data.azurerm_resource_group.velocap.location
-  tags                = local.tags
+  source               = "../../modules/storage-account"
+  name                 = "velocapst${var.env}aue01"
+  resource_group_name  = data.azurerm_resource_group.velocap.name
+  location             = data.azurerm_resource_group.velocap.location
+  tags                 = local.tags
+  cors_allowed_origins = ["https://ambitious-wave-08351ef03.7.azurestaticapps.net"]
 }
 
 module "postgres" {

@@ -1,7 +1,84 @@
 // Offscreen document — runs a MediaRecorder on a tabCapture or desktopCapture
 // stream, optionally mixed with microphone audio. MV3 service workers can't
-// own a MediaStream, so we do the heavy lifting here and ship the final
-// WebM back as a base64 data URL.
+// own a MediaStream, so we do the heavy lifting here.
+//
+// Streaming upload: chunks are uploaded directly to Azure via SAS URL during
+// recording (Put Block per second). On stop, Put Block List commits them into
+// a single playable blob. No base64, no dataUrl, no sendMessage size limits.
+
+// Inline azure upload functions — the offscreen doc is loaded as a non-module
+// script (CRXJS strips type="module"), so static imports break at runtime.
+
+function _blockId(index: number): string {
+  return btoa(String(index).padStart(6, '0'));
+}
+
+async function putBlock(sasUrl: string, index: number, data: Blob): Promise<void> {
+  const id = _blockId(index);
+  const sep = sasUrl.includes('?') ? '&' : '?';
+  const url = `${sasUrl}${sep}comp=block&blockid=${encodeURIComponent(id)}`;
+  let lastErr: Error | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: 'PUT',
+        headers: { 'x-ms-blob-type': 'BlockBlob', 'Content-Length': String(data.size) },
+        body: data,
+      });
+      if (res.ok) return;
+      lastErr = new Error(`PUT Block ${index} failed: ${res.status} ${res.statusText}`);
+    } catch (e) {
+      lastErr = e instanceof Error ? e : new Error(String(e));
+    }
+    if (attempt < 2) await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
+  }
+  throw lastErr ?? new Error(`PUT Block ${index} failed after retries`);
+}
+
+async function putBlockList(sasUrl: string, blockCount: number): Promise<void> {
+  const ids = Array.from({ length: blockCount }, (_, i) => _blockId(i));
+  const xml = [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    '<BlockList>',
+    ...ids.map((id) => `  <Latest>${id}</Latest>`),
+    '</BlockList>',
+  ].join('\n');
+  const sep = sasUrl.includes('?') ? '&' : '?';
+  const url = `${sasUrl}${sep}comp=blocklist`;
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/xml', 'x-ms-blob-content-type': 'video/webm' },
+    body: xml,
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Put Block List failed: ${res.status} ${res.statusText} — ${body}`);
+  }
+}
+
+// Inline IndexedDB helper — save recording blob for instant preview.
+const IDB_NAME = 'velocap';
+const IDB_STORE = 'blobs';
+function _openDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(IDB_STORE))
+        req.result.createObjectStore(IDB_STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function _saveBlob(key: string, blob: Blob): Promise<void> {
+  const db = await _openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put(blob, key);
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
+}
 
 type StartMsg = {
   target: 'offscreen';
@@ -14,16 +91,17 @@ type StartMsg = {
   captureAudio: boolean;
   /** Record the user's microphone too. */
   mic: boolean;
+  /** SAS URL for direct-to-Azure block uploads. */
+  uploadSasUrl: string;
 };
 type StopMsg = { target: 'offscreen'; kind: 'stop' };
 
-type RecordedMsg = {
+type UploadCompleteMsg = {
   target: 'bg';
-  kind: 'recorded';
-  dataUrl: string;
+  kind: 'upload-complete';
   durationMs: number;
   bytes: number;
-  // Lets the popup surface a non-fatal hint like "mic was denied".
+  blockCount: number;
   note?: string;
 };
 type ErrorMsg = { target: 'bg'; kind: 'recorder-error'; message: string };
@@ -37,6 +115,12 @@ interface Session {
   startedAt: number;
   mimeType: string;
   note?: string;
+  // Streaming upload state
+  uploadSasUrl: string;
+  blockIndex: number;
+  uploadQueue: Promise<void>;
+  totalBytes: number;
+  failedBlocks: number[];
 }
 
 let session: Session | null = null;
@@ -207,7 +291,20 @@ async function start(msg: StartMsg): Promise<void> {
 
   recorder.ondataavailable = (e) => {
     console.log('[velocap/offscreen] ondataavailable:', e.data.size, 'bytes');
-    if (e.data.size) chunks.push(e.data);
+    if (!e.data.size) return;
+    chunks.push(e.data);
+    // Stream this chunk to Azure
+    const s = session;
+    if (s) {
+      const idx = s.blockIndex++;
+      s.totalBytes += e.data.size;
+      s.uploadQueue = s.uploadQueue
+        .then(() => putBlock(s.uploadSasUrl, idx, e.data))
+        .catch((err) => {
+          console.error(`[velocap/offscreen] putBlock ${idx} failed:`, err);
+          s.failedBlocks.push(idx);
+        });
+    }
   };
 
   recorder.onerror = (e) => {
@@ -227,32 +324,53 @@ async function start(msg: StartMsg): Promise<void> {
     for (const src of s.sources) src.getTracks().forEach((t) => t.stop());
     if (s.audioCtx) void s.audioCtx.close().catch(() => undefined);
     try {
+      const durationMs = Date.now() - s.startedAt;
       console.log('[velocap/offscreen] finalizing', {
         chunkCount: chunks.length,
-        chunkSizes: chunks.map((c) => c.size),
-        mime: s.mimeType,
-        firstChunkType: chunks[0]?.type,
+        blockIndex: s.blockIndex,
+        totalBytes: s.totalBytes,
+        failedBlocks: s.failedBlocks,
       });
 
-      // Use the actual MIME type from the first chunk if available,
-      // as MediaRecorder may use a different format than requested.
-      const actualMime = chunks[0]?.type || s.mimeType || 'video/webm';
-      console.log('[velocap/offscreen] using actualMime:', actualMime);
+      // Wait for all pending block uploads to complete
+      await s.uploadQueue;
+      console.log('[velocap/offscreen] all blocks uploaded');
 
-      const raw = new Blob(chunks, { type: actualMime });
-      const durationMs = Date.now() - s.startedAt;
+      // Retry any failed blocks from local chunks
+      for (const idx of s.failedBlocks) {
+        if (chunks[idx]) {
+          console.log(`[velocap/offscreen] retrying failed block ${idx}`);
+          try {
+            await putBlock(s.uploadSasUrl, idx, chunks[idx]);
+          } catch (err) {
+            console.error(`[velocap/offscreen] retry block ${idx} failed:`, err);
+            throw new Error(`Block ${idx} failed after retry — upload incomplete`);
+          }
+        }
+      }
 
-      console.log('[velocap/offscreen] raw blob size:', raw.size, 'type:', raw.type);
+      // Commit all blocks into a single blob
+      await putBlockList(s.uploadSasUrl, s.blockIndex);
+      console.log('[velocap/offscreen] block list committed');
 
-      const dataUrl = await blobToDataUrl(raw);
+      // Save blob to IndexedDB for instant preview (non-fatal if it fails)
+      try {
+        const actualMime = chunks[0]?.type || s.mimeType || 'video/webm';
+        const fullBlob = new Blob(chunks, { type: actualMime });
+        await _saveBlob('pending-recording', fullBlob);
+        console.log('[velocap/offscreen] saved to IndexedDB', { size: fullBlob.size });
+      } catch (e) {
+        console.warn('[velocap/offscreen] IndexedDB save failed (preview will use Azure URL)', e);
+      }
+
       await chrome.runtime.sendMessage({
         target: 'bg',
-        kind: 'recorded',
-        dataUrl,
+        kind: 'upload-complete',
         durationMs,
-        bytes: raw.size,
+        bytes: s.totalBytes,
+        blockCount: s.blockIndex,
         ...(s.note ? { note: s.note } : {}),
-      } satisfies RecordedMsg);
+      } satisfies UploadCompleteMsg);
     } catch (err) {
       await chrome.runtime.sendMessage({
         target: 'bg',
@@ -276,13 +394,18 @@ async function start(msg: StartMsg): Promise<void> {
     chunks,
     startedAt: Date.now(),
     mimeType,
+    uploadSasUrl: msg.uploadSasUrl,
+    blockIndex: 0,
+    uploadQueue: Promise.resolve(),
+    totalBytes: 0,
+    failedBlocks: [],
     ...(note ? { note } : {}),
   };
 
-  // Start without timeslice - this produces a single complete WebM on stop.
-  // Timeslice mode produces chunks that aren't independently valid WebM files.
-  recorder.start();
-  console.log('[velocap/offscreen] recorder started (no timeslice)');
+  // 1-second timeslice: each chunk is uploaded to Azure as a block during
+  // recording. On stop, Put Block List commits all blocks into a single blob.
+  recorder.start(1000);
+  console.log('[velocap/offscreen] recorder started (1s timeslice, streaming to Azure)');
 }
 
 function stop(): void {
@@ -301,15 +424,6 @@ function stop(): void {
     session.recorder.stop();
     console.log('[velocap/offscreen] stop called on recorder');
   }
-}
-
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result as string);
-    r.onerror = () => reject(r.error);
-    r.readAsDataURL(blob);
-  });
 }
 
 // Global error handler to catch any unhandled errors

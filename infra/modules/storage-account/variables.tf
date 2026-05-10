@@ -15,3 +15,9 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "cors_allowed_origins" {
+  description = "Origins allowed for CORS on blob storage (e.g., dashboard URLs)."
+  type        = list(string)
+  default     = []
+}

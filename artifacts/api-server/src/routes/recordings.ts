@@ -204,6 +204,15 @@ router.patch("/recordings/:id", async (req: any, res) => {
     const updates: Record<string, any> = { updatedAt: new Date() };
     if (body.title !== undefined) updates.title = body.title;
     if (body.tags !== undefined) updates.tags = body.tags;
+    if (body.trimStartMs !== undefined) {
+      updates.trimStartMs = body.trimStartMs === null ? null : Number(body.trimStartMs);
+      // Invalidate cached trimmed video when trim points change
+      updates.trimmedVideoObjectPath = null;
+    }
+    if (body.trimEndMs !== undefined) {
+      updates.trimEndMs = body.trimEndMs === null ? null : Number(body.trimEndMs);
+      updates.trimmedVideoObjectPath = null;
+    }
 
     const [recording] = await db
       .update(recordingsTable)
@@ -351,6 +360,8 @@ function sanitizeRecording(r: typeof recordingsTable.$inferSelect) {
     thumbnailObjectPath: r.thumbnailObjectPath,
     videoUrl: objectStorageService.getReadOnlySasUrl(r.videoObjectPath),
     thumbnailUrl: objectStorageService.getReadOnlySasUrl(r.thumbnailObjectPath),
+    trimStartMs: r.trimStartMs,
+    trimEndMs: r.trimEndMs,
     shareToken: r.shareToken,
     tags,
     browserInfo,

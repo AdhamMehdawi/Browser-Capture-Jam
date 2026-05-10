@@ -4,18 +4,25 @@ import "plyr/dist/plyr.css";
 interface StreamingVideoPlayerProps {
   videoUrl: string;
   knownDurationMs: number | null | undefined;
+  trimStartMs?: number | null;
+  trimEndMs?: number | null;
   onExpired?: () => void;
 }
 
 export function StreamingVideoPlayer({
   videoUrl,
   knownDurationMs,
+  trimStartMs,
+  trimEndMs,
   onExpired,
 }: StreamingVideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const plyrRef = useRef<{ destroy(): void } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const knownSec = knownDurationMs ? knownDurationMs / 1000 : 0;
+  const trimStartSec = (trimStartMs ?? 0) / 1000;
+  const trimEndSec = trimEndMs ? trimEndMs / 1000 : 0;
+  const hasTrim = trimStartMs != null && trimEndMs != null;
 
   // Initialize Plyr when videoUrl changes
   useEffect(() => {
@@ -59,6 +66,42 @@ export function StreamingVideoPlayer({
       }
     };
   }, [videoUrl, knownSec]);
+
+  // Enforce trim bounds during playback
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || !hasTrim) return;
+
+    const handleTimeUpdate = () => {
+      if (v.currentTime < trimStartSec) {
+        v.currentTime = trimStartSec;
+      }
+      if (trimEndSec > 0 && v.currentTime >= trimEndSec) {
+        v.pause();
+        v.currentTime = trimStartSec;
+      }
+    };
+
+    const handleSeeked = () => {
+      // After initial load, seek to trim start
+      if (v.currentTime < trimStartSec) {
+        v.currentTime = trimStartSec;
+      }
+    };
+
+    v.addEventListener("timeupdate", handleTimeUpdate);
+    v.addEventListener("loadedmetadata", handleSeeked);
+
+    // If already loaded, seek now
+    if (v.readyState >= 1 && v.currentTime < trimStartSec) {
+      v.currentTime = trimStartSec;
+    }
+
+    return () => {
+      v.removeEventListener("timeupdate", handleTimeUpdate);
+      v.removeEventListener("loadedmetadata", handleSeeked);
+    };
+  }, [hasTrim, trimStartSec, trimEndSec]);
 
   // Fix duration for WebM files that report Infinity or wrong duration
   const fixDuration = (v: HTMLVideoElement) => {

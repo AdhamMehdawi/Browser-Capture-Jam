@@ -244,8 +244,10 @@ function hidePreview(): void {
  * when the user hits Discard / Close.
  */
 function showPreview(_msg: {
-  dataUrl: string;
+  readSasUrl?: string;
+  screenshotDataUrl?: string;
   mimeType?: string;
+  mediaType?: string;
   durationMs?: number;
   bytes?: number;
   note?: string;

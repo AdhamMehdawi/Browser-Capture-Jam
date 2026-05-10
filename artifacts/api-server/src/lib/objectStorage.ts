@@ -180,6 +180,40 @@ export class ObjectStorageService {
     return blob;
   }
 
+  /**
+   * Generate a SAS URL for block-level uploads (Put Block + Put Block List).
+   * Returns the objectPath and uploadSasUrl for direct-to-Azure streaming.
+   */
+  getBlockUploadSasUrl(ext: string): { objectPath: string; uploadSasUrl: string } {
+    const id = randomUUID();
+    const blobName = `${PRIVATE_PREFIX}/${id}.${ext}`;
+    const blob = this.container.getBlockBlobClient(blobName);
+    const sas = generateBlobSASQueryParameters(
+      {
+        containerName: this.container.containerName,
+        blobName,
+        permissions: BlobSASPermissions.parse("cw"),
+        startsOn: new Date(Date.now() - 60_000),
+        expiresOn: new Date(Date.now() + 30 * 60_000), // 30 min
+      },
+      this.sharedKey,
+    ).toString();
+    return {
+      objectPath: `/objects/${id}.${ext}`,
+      uploadSasUrl: `${blob.url}?${sas}`,
+    };
+  }
+
+  /**
+   * Delete a blob from storage. Used when user discards a recording.
+   */
+  async deleteBlob(objectPath: string): Promise<void> {
+    const entityId = objectPath.replace(/^\/objects\//, "");
+    if (!entityId) return;
+    const blob = this.container.getBlockBlobClient(`${PRIVATE_PREFIX}/${entityId}`);
+    await blob.deleteIfExists();
+  }
+
   // Accepts an upload URL (SAS) or a bare /objects/<id> path; returns the
   // canonical /objects/<id> form.
   normalizeObjectEntityPath(rawPath: string): string {

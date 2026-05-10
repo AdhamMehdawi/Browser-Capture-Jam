@@ -81,6 +81,7 @@ export default defineManifest({
         'src/offscreen/index.html',
         'assets/preview*.js',
         'assets/offscreen*.js',
+        'icons/logo.svg',
       ],
       matches: ['<all_urls>'],
     },

@@ -1,6 +1,7 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useParams, Link } from "wouter";
 import { format } from "date-fns";
+import { Scissors, RotateCcw } from "lucide-react";
 import { StreamingVideoPlayer } from "@/components/StreamingVideoPlayer";
 import {
   ArrowLeft, Share2, Globe, Terminal, MousePointerClick, Activity,
@@ -250,9 +251,27 @@ export default function RecordingViewer() {
   }, [detailOpen]);
   const [shareUrl, setShareUrl] = useState("");
 
+  // Trim state — hooks must be before any early returns
+  const [trimStart, setTrimStart] = useState<number>(0);
+  const [trimEnd, setTrimEnd] = useState<number>(0);
+  const [trimActive, setTrimActive] = useState<boolean>(false);
+  const [trimSaving, setTrimSaving] = useState(false);
+  const trimDebounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const trimInitialized = useRef(false);
+
   const { data: recording, isLoading } = useGetRecording(id, {
     query: { enabled: !!id, queryKey: getGetRecordingQueryKey(id) }
   });
+
+  // Initialize trim state when recording loads
+  useEffect(() => {
+    if (!recording || trimInitialized.current) return;
+    trimInitialized.current = true;
+    const rec = recording as any;
+    setTrimStart(rec.trimStartMs ?? 0);
+    setTrimEnd(rec.trimEndMs ?? recording.duration);
+    setTrimActive(rec.trimStartMs != null && rec.trimEndMs != null);
+  }, [recording]);
 
   const createShareLink = useCreateShareLink();
 
@@ -341,6 +360,46 @@ export default function RecordingViewer() {
   const videoUrl = !isScreenshot ? ((recording as any).videoUrl ?? proxyUrl) : null;
   const screenshotUrl = isScreenshot ? ((recording as any).videoUrl ?? proxyUrl) : null;
 
+  const durationMs = recording.duration || 1;
+  const fmtTime = (ms: number) => {
+    const s = Math.round(ms / 1000);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  };
+
+  const saveTrim = async (start: number | null, end: number | null) => {
+    setTrimSaving(true);
+    try {
+      const token = await (window as any).Clerk?.session?.getToken();
+      await fetch(`${apiBase}/api/recordings/${recording.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ trimStartMs: start, trimEndMs: end }),
+      });
+    } catch {
+      // silent fail — trim will apply on next save
+    } finally {
+      setTrimSaving(false);
+    }
+  };
+
+  const handleTrimChange = (start: number, end: number) => {
+    setTrimStart(start);
+    setTrimEnd(end);
+    if (!trimActive) setTrimActive(true);
+    if (trimDebounce.current) clearTimeout(trimDebounce.current);
+    trimDebounce.current = setTimeout(() => saveTrim(start, end), 800);
+  };
+
+  const handleResetTrim = () => {
+    setTrimActive(false);
+    setTrimStart(0);
+    setTrimEnd(durationMs);
+    saveTrim(null, null);
+  };
+
   return (
     <div className="flex flex-col h-full bg-background overflow-hidden">
       {/* Header */}
@@ -387,7 +446,68 @@ export default function RecordingViewer() {
                 {videoUrl ? (
                   <div className="w-full max-w-5xl">
                     <div className="rounded-lg shadow-lg bg-black">
-                      <StreamingVideoPlayer videoUrl={videoUrl} knownDurationMs={recording.duration} />
+                      <StreamingVideoPlayer
+                        videoUrl={videoUrl}
+                        knownDurationMs={recording.duration}
+                        trimStartMs={trimActive ? trimStart : undefined}
+                        trimEndMs={trimActive ? trimEnd : undefined}
+                      />
+                    </div>
+                    {/* Trim Editor */}
+                    <div className="mt-3 bg-card border border-border rounded-lg p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2 text-sm font-medium">
+                          <Scissors size={14} />
+                          <span>Trim</span>
+                          {trimActive && (
+                            <span className="text-xs text-muted-foreground font-mono">
+                              {fmtTime(trimStart)} – {fmtTime(trimEnd)}
+                            </span>
+                          )}
+                          {trimSaving && <span className="text-xs text-muted-foreground">Saving…</span>}
+                        </div>
+                        {trimActive && (
+                          <Button variant="ghost" size="sm" onClick={handleResetTrim} className="gap-1 text-xs h-7">
+                            <RotateCcw size={12} /> Reset
+                          </Button>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs text-muted-foreground font-mono w-10">{fmtTime(trimStart)}</span>
+                        <div className="flex-1 relative">
+                          {/* Start handle */}
+                          <input
+                            type="range"
+                            min={0}
+                            max={durationMs}
+                            step={100}
+                            value={trimStart}
+                            onChange={(e) => handleTrimChange(Math.min(Number(e.target.value), trimEnd - 500), trimEnd)}
+                            className="absolute inset-0 w-full appearance-none bg-transparent pointer-events-auto z-10 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded [&::-webkit-slider-thumb]:cursor-grab"
+                          />
+                          {/* End handle */}
+                          <input
+                            type="range"
+                            min={0}
+                            max={durationMs}
+                            step={100}
+                            value={trimEnd}
+                            onChange={(e) => handleTrimChange(trimStart, Math.max(Number(e.target.value), trimStart + 500))}
+                            className="absolute inset-0 w-full appearance-none bg-transparent pointer-events-auto z-10 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded [&::-webkit-slider-thumb]:cursor-grab"
+                          />
+                          {/* Visual track */}
+                          <div className="h-2 bg-muted rounded-full relative">
+                            <div
+                              className="absolute h-full bg-primary/30 rounded-full"
+                              style={{
+                                left: `${(trimStart / durationMs) * 100}%`,
+                                width: `${((trimEnd - trimStart) / durationMs) * 100}%`,
+                              }}
+                            />
+                          </div>
+                        </div>
+                        <span className="text-xs text-muted-foreground font-mono w-10 text-right">{fmtTime(trimEnd)}</span>
+                      </div>
                     </div>
                   </div>
                 ) : screenshotUrl ? (

@@ -168,4 +168,8 @@
     background-color: hsl(250 30% 98%);
     min-height: 100dvh;
   }
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
 }

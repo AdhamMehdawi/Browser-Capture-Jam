@@ -341,11 +341,71 @@ export default function RecordingViewer() {
   };
 
   if (isLoading) {
-    return <div className="p-8 space-y-6">
-      <Skeleton className="h-10 w-1/3" />
-      <Skeleton className="h-[400px] w-full" />
-      <Skeleton className="h-64 w-full" />
-    </div>;
+    return (
+      <div className="flex flex-col h-full bg-background overflow-hidden">
+        {/* Header skeleton — matches the real header layout */}
+        <header className="px-6 py-4 border-b border-border flex items-center justify-between shrink-0 bg-card">
+          <div className="flex items-center gap-4">
+            <Skeleton className="h-9 w-9 rounded-md" />
+            <div className="space-y-2">
+              <Skeleton className="h-5 w-48" />
+              <div className="flex items-center gap-3">
+                <Skeleton className="h-3 w-40" />
+                <Skeleton className="h-3 w-32" />
+              </div>
+            </div>
+          </div>
+          <Skeleton className="h-9 w-24 rounded-md" />
+        </header>
+
+        {/* Body — video on the left, sidebar on the right */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Left: video placeholder */}
+          <div className="flex-1 bg-muted/30 p-6 flex items-start justify-center">
+            <div className="w-full max-w-5xl">
+              <Skeleton className="aspect-video w-full rounded-lg" />
+            </div>
+          </div>
+
+          {/* Right: tabs + info panel */}
+          <div className="w-[35%] min-w-[320px] border-l border-border flex flex-col">
+            <div className="border-b border-border bg-card flex gap-3 px-4 py-2.5">
+              <Skeleton className="h-6 w-14" />
+              <Skeleton className="h-6 w-20" />
+              <Skeleton className="h-6 w-20" />
+              <Skeleton className="h-6 w-20" />
+            </div>
+            <div className="p-4 space-y-5">
+              <div className="space-y-2">
+                <Skeleton className="h-3 w-10" />
+                <Skeleton className="h-4 w-full" />
+              </div>
+              <div className="space-y-2">
+                <Skeleton className="h-3 w-24" />
+                <Skeleton className="h-4 w-2/3" />
+              </div>
+              <div className="space-y-2">
+                <Skeleton className="h-3 w-20" />
+                <Skeleton className="h-4 w-1/2" />
+              </div>
+              <div className="space-y-2">
+                <Skeleton className="h-3 w-16" />
+                <Skeleton className="h-4 w-1/3" />
+              </div>
+              <div className="space-y-2">
+                <Skeleton className="h-3 w-12" />
+                <div className="grid grid-cols-2 gap-2">
+                  <Skeleton className="h-16 w-full rounded-md" />
+                  <Skeleton className="h-16 w-full rounded-md" />
+                  <Skeleton className="h-16 w-full rounded-md" />
+                  <Skeleton className="h-16 w-full rounded-md" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (!recording) {

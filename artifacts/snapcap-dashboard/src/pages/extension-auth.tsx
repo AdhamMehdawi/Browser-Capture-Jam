@@ -113,7 +113,7 @@ export default function ExtensionAuth() {
     return (
       <div className="flex min-h-[100dvh] flex-col items-center justify-center px-4">
         <div className="mb-6 text-center">
-          <h1 className="text-2xl font-bold text-white mb-2">Sign in to Velo QA</h1>
+          <h1 className="text-2xl font-bold text-foreground mb-2">Sign in to Velo QA</h1>
           <p className="text-muted-foreground">Sign in to connect your Chrome extension</p>
         </div>
         <SignIn
@@ -128,12 +128,14 @@ export default function ExtensionAuth() {
   if (status === "loading" || status === "sending") {
     return (
       <div className="flex min-h-[100dvh] flex-col items-center justify-center px-4">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4" />
-          <h1 className="text-xl font-semibold text-white mb-2">
+        <div className="w-full max-w-md rounded-2xl border border-border bg-card p-8 text-center shadow-2xl">
+          <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-primary/10 ring-4 ring-primary/20">
+            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary" />
+          </div>
+          <h1 className="mb-2 text-2xl font-semibold text-foreground">
             {status === "loading" ? "Loading..." : "Connecting extension..."}
           </h1>
-          <p className="text-muted-foreground">Please wait</p>
+          <p className="text-sm text-muted-foreground">Please wait</p>
         </div>
       </div>
     );
@@ -143,13 +145,27 @@ export default function ExtensionAuth() {
   if (status === "error") {
     return (
       <div className="flex min-h-[100dvh] flex-col items-center justify-center px-4">
-        <div className="text-center max-w-md">
-          <div className="text-red-500 text-4xl mb-4">✕</div>
-          <h1 className="text-xl font-semibold text-white mb-2">Authentication Failed</h1>
-          <p className="text-muted-foreground mb-4">{error}</p>
+        <div className="w-full max-w-md rounded-2xl border border-border bg-card p-8 text-center shadow-2xl">
+          <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-red-500/10 ring-4 ring-red-500/20">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-10 w-10 text-red-400"
+              aria-hidden="true"
+            >
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </div>
+          <h1 className="mb-2 text-2xl font-semibold text-foreground">Authentication Failed</h1>
+          <p className="mb-7 text-sm text-muted-foreground">{error}</p>
           <button
             onClick={() => window.close()}
-            className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary/90"
+            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
           >
             Close
           </button>

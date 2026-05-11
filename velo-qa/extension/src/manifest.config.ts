@@ -22,7 +22,7 @@ export default defineManifest({
   name: 'VeloCap',
   short_name: 'VeloCap',
   description: 'One-click bug capture — record screen, console, network, and user actions, then share a repro link.',
-  version: '0.2.0',
+  version: '1.0.0',
   action: {
     default_popup: 'src/popup/index.html',
     default_title: 'VeloCap — capture a bug',

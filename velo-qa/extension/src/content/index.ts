@@ -276,7 +276,7 @@ function showPreview(_msg: {
       }
       .frame {
         width: min(960px, 100%);
-        height: min(720px, 90vh);
+        height: min(720px, 85vh);
         border: 1px solid #22283a;
         border-radius: 14px;
         overflow: hidden;

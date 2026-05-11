@@ -263,6 +263,15 @@ export default function RecordingViewer() {
     query: { enabled: !!id, queryKey: getGetRecordingQueryKey(id) }
   });
 
+  // Keep the skeleton on screen for at least 400ms so brief loads don't
+  // flash. Without this, a fast API response makes the skeleton appear
+  // for ~100ms and feels like a janky flicker instead of a load state.
+  const [minSkeletonElapsed, setMinSkeletonElapsed] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setMinSkeletonElapsed(true), 400);
+    return () => clearTimeout(t);
+  }, []);
+
   // Initialize trim state when recording loads
   useEffect(() => {
     if (!recording || trimInitialized.current) return;
@@ -340,7 +349,7 @@ export default function RecordingViewer() {
     return <Info className="text-muted-foreground h-4 w-4" />;
   };
 
-  if (isLoading) {
+  if (isLoading || !minSkeletonElapsed) {
     return (
       <div className="flex flex-col h-full bg-background overflow-hidden">
         {/* Header skeleton — matches the real header layout */}

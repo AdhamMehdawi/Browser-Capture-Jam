@@ -2,6 +2,7 @@ import { Router } from "express";
 import { randomUUID } from "crypto";
 import { db, recordingsTable } from "@workspace/db";
 import { ObjectStorageService } from "../lib/objectStorage";
+import { encryptEvents } from "../lib/encryption";
 import { requireAuth } from "../middlewares/requireAuth";
 
 const router = Router();
@@ -131,7 +132,7 @@ router.post("/uploads/complete", async (req: any, res) => {
         trimStartMs,
         trimEndMs,
         tags: [],
-        events,
+        events: process.env.EVENTS_ENCRYPTION_KEY_V1 ? encryptEvents(events) : events,
         browserInfo,
       })
       .returning();

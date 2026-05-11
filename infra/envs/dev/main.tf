@@ -140,6 +140,18 @@ resource "azurerm_key_vault_secret" "clerk_publishable_key" {
   }
 }
 
+# Encryption key for events at rest (GDPR). Set real value via:
+#   az keyvault secret set --vault-name velocap-kv-dev --name events-encryption-key-v1 --value <64-char-hex>
+resource "azurerm_key_vault_secret" "events_encryption_key_v1" {
+  name         = "events-encryption-key-v1"
+  value        = "REPLACE_ME"
+  key_vault_id = module.key_vault.id
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
 # Read the LIVE values from KV so `terraform apply` picks up any
 # out-of-band updates (from `az keyvault secret set`). These are what
 # actually flow into the Container App's secret store.
@@ -153,6 +165,12 @@ data "azurerm_key_vault_secret" "clerk_publishable_key_live" {
   name         = "clerk-publishable-key"
   key_vault_id = module.key_vault.id
   depends_on   = [azurerm_key_vault_secret.clerk_publishable_key]
+}
+
+data "azurerm_key_vault_secret" "events_encryption_key_v1_live" {
+  name         = "events-encryption-key-v1"
+  key_vault_id = module.key_vault.id
+  depends_on   = [azurerm_key_vault_secret.events_encryption_key_v1]
 }
 
 # -----------------------------------------------------------------------------
@@ -186,6 +204,7 @@ module "api" {
     { name = "NODE_ENV", value = "development" },
     { name = "PORT", value = "4000" },
     { name = "DASHBOARD_URL", value = "https://${module.dashboard.default_host_name}" },
+    { name = "EVENTS_ENCRYPTION_KEY_CURRENT", value = "v1" },
   ]
 
   env_secret_refs = [
@@ -194,6 +213,7 @@ module "api" {
     { name = "CLERK_SECRET_KEY", secret_name = "clerk-secret-key" },
     { name = "CLERK_PUBLISHABLE_KEY", secret_name = "clerk-publishable-key" },
     { name = "APPLICATIONINSIGHTS_CONNECTION_STRING", secret_name = "appi-connection-string" },
+    { name = "EVENTS_ENCRYPTION_KEY_V1", secret_name = "events-encryption-key-v1" },
   ]
 
   secrets = [
@@ -202,6 +222,7 @@ module "api" {
     { name = "clerk-secret-key", value = data.azurerm_key_vault_secret.clerk_secret_key_live.value },
     { name = "clerk-publishable-key", value = data.azurerm_key_vault_secret.clerk_publishable_key_live.value },
     { name = "appi-connection-string", value = module.app_insights.connection_string },
+    { name = "events-encryption-key-v1", value = data.azurerm_key_vault_secret.events_encryption_key_v1_live.value },
   ]
 
   tags = local.tags

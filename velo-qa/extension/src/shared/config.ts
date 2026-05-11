@@ -12,4 +12,8 @@ export const DASHBOARD_URL: string =
 export const STORAGE_KEYS = {
   auth: 'velocap.auth',
   activeWorkspaceId: 'velocap.activeWorkspaceId',
+  consentGiven: 'velocap.consentGiven',
 } as const;
+
+/** Bump this when the privacy policy changes materially to re-trigger consent. */
+export const CURRENT_CONSENT_VERSION = 'v1';

@@ -5,6 +5,7 @@ import { eq, and, desc, sql, ilike, or } from "drizzle-orm";
 import crypto from "crypto";
 import { requireAuth } from "../middlewares/requireAuth";
 import { ObjectStorageService } from "../lib/objectStorage";
+import { decryptEventsIfNeeded } from "../lib/encryption";
 
 const objectStorageService = new ObjectStorageService();
 
@@ -191,7 +192,7 @@ router.get("/recordings/:id", async (req: any, res) => {
 
     if (!recording) return res.status(404).json({ error: "Not found" });
 
-    res.json({ ...sanitizeRecording(recording), events: recording.events });
+    res.json({ ...sanitizeRecording(recording), events: decryptEventsIfNeeded(recording.events) });
   } catch (err) {
     req.log.error({ err }, "Failed to get recording");
     res.status(500).json({ error: "Internal server error" });

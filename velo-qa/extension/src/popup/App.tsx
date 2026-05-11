@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../shared/api.js';
-import { clearAuth, getAuth, setAuth } from '../shared/storage.js';
+import { clearAuth, getAuth, setAuth, getConsent } from '../shared/storage.js';
 import { DASHBOARD_URL } from '../shared/config.js';
 import type { AuthState } from '../types.js';
 
@@ -62,9 +62,15 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    // Check for existing auth on startup
+    // Check consent + auth on startup
     void (async () => {
       try {
+        const consent = await getConsent();
+        if (!consent) {
+          chrome.tabs.create({ url: chrome.runtime.getURL('src/consent/index.html') });
+          setView('auth');
+          return;
+        }
         const stored = await getAuth();
         console.log('[popup] Checking stored auth:', stored ? 'found' : 'none');
         if (stored && stored.accessToken && stored.user) {

@@ -17,6 +17,7 @@ export default defineConfig({
         permissions: 'src/permissions/index.html',
         'permissions-screen': 'src/permissions/screen.html',
         preview: 'src/preview/index.html',
+        consent: 'src/consent/index.html',
       },
     },
   },

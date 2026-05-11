@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Key, Copy, AlertTriangle, CheckCircle2, Shield } from "lucide-react";
+import { Key, Copy, AlertTriangle, CheckCircle2, Shield, Download, Trash2 } from "lucide-react";
 import { useGetMe, useGenerateApiKey, getGetMeQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useUser, useClerk } from "@clerk/react";
@@ -141,17 +141,92 @@ export default function Settings() {
             </CardFooter>
           </Card>
 
-          {/* Danger Zone */}
+          {/* Data & Privacy */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Shield className="h-5 w-5" />
+                Data & Privacy
+              </CardTitle>
+              <CardDescription>Export or delete your data in compliance with GDPR.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-medium">Export My Data</h4>
+                  <p className="text-sm text-muted-foreground">Download all your recordings and metadata as JSON.</p>
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={async () => {
+                    try {
+                      const apiBase = import.meta.env.VITE_API_URL ?? "";
+                      const token = await (window as any).Clerk?.session?.getToken();
+                      const res = await fetch(`${apiBase}/api/me/export`, {
+                        headers: token ? { Authorization: `Bearer ${token}` } : {},
+                      });
+                      if (!res.ok) throw new Error("Export failed");
+                      const blob = await res.blob();
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = `velocap-export-${Date.now()}.json`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                      toast.success("Data exported successfully");
+                    } catch {
+                      toast.error("Failed to export data");
+                    }
+                  }}
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Export
+                </Button>
+              </div>
+              <hr className="border-border" />
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-medium text-destructive">Delete My Account</h4>
+                  <p className="text-sm text-muted-foreground">Permanently delete your account and all recordings. This cannot be undone.</p>
+                </div>
+                <Button
+                  variant="destructive"
+                  onClick={async () => {
+                    if (!confirm("Are you sure you want to delete your account? This action is irreversible — all recordings and data will be permanently deleted.")) return;
+                    if (!confirm("This is your last chance. Type DELETE to confirm... (Click OK to proceed)")) return;
+                    try {
+                      const apiBase = import.meta.env.VITE_API_URL ?? "";
+                      const token = await (window as any).Clerk?.session?.getToken();
+                      const res = await fetch(`${apiBase}/api/me`, {
+                        method: "DELETE",
+                        headers: token ? { Authorization: `Bearer ${token}` } : {},
+                      });
+                      if (!res.ok) throw new Error("Delete failed");
+                      toast.success("Account deleted");
+                      signOut();
+                    } catch {
+                      toast.error("Failed to delete account");
+                    }
+                  }}
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Account
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Sign Out */}
           <Card className="border-destructive/20">
             <CardHeader>
               <CardTitle className="text-destructive flex items-center gap-2">
                 <AlertTriangle className="h-5 w-5" />
-                Danger Zone
+                Session
               </CardTitle>
             </CardHeader>
             <CardContent>
               <p className="text-sm text-muted-foreground mb-4">
-                Sign out of your account on this device. To delete your account or manage auth providers, use the Replit workspace.
+                Sign out of your account on this device.
               </p>
               <Button variant="destructive" onClick={() => signOut()}>
                 Sign Out

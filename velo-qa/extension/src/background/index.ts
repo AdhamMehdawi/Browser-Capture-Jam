@@ -153,6 +153,19 @@ async function clearPersistedPreview(): Promise<void> {
 // Restore state on service worker startup
 void restorePendingPreview();
 
+// First-run consent: open consent page on install or if consent version changed
+chrome.runtime.onInstalled.addListener(async (details) => {
+  if (details.reason === 'install' || details.reason === 'update') {
+    const { getConsent } = await import('../shared/storage.js');
+    const consent = await getConsent();
+    if (!consent) {
+      chrome.tabs.create({
+        url: chrome.runtime.getURL('src/consent/index.html'),
+      });
+    }
+  }
+});
+
 async function showOverlayOn(tabId: number, startedAt: number): Promise<void> {
   try {
     await chrome.tabs.sendMessage(tabId, { kind: 'overlay:show', startedAt });

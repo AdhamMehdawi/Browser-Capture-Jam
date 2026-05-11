@@ -99,7 +99,7 @@ export default function Home() {
             <span>© {new Date().getFullYear()}</span>
           </div>
           <div className="flex gap-6">
-            <a href="#" className="hover:text-foreground transition-colors">Privacy</a>
+            <a href="/privacy" className="hover:text-foreground transition-colors">Privacy</a>
             <a href="#" className="hover:text-foreground transition-colors">Terms</a>
             <a href="#" className="hover:text-foreground transition-colors">GitHub</a>
           </div>

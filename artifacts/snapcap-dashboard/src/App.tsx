@@ -6,6 +6,7 @@ import { setAuthTokenGetter } from "@workspace/api-client-react";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
+import Privacy from "@/pages/privacy";
 import Home from "@/pages/home";
 import Dashboard from "@/pages/dashboard";
 import RecordingViewer from "@/pages/recording";
@@ -168,6 +169,7 @@ function Router() {
         <ProtectedRoute component={Settings} />
       </Route>
       
+      <Route path="/privacy" component={Privacy} />
       <Route component={NotFound} />
     </Switch>
   );

@@ -3,8 +3,23 @@ import { db } from "@workspace/db";
 import { recordingsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { ObjectStorageService } from "../lib/objectStorage";
+import { decryptEventsIfNeeded } from "../lib/encryption";
 
 const objectStorageService = new ObjectStorageService();
+
+/**
+ * Strip requestBody and responseBody from network events in shared recordings.
+ * Shared links are public — even with header redaction, bodies may contain
+ * business-sensitive data. Keep method, URL, status, headers, and timing.
+ */
+function stripBodiesForShare(events: unknown): unknown {
+  if (!Array.isArray(events)) return events;
+  return events.map((e: Record<string, unknown>) => {
+    if (e.type !== 'request') return e;
+    const { requestBody, responseBody, ...rest } = e;
+    return rest;
+  });
+}
 
 const router = Router();
 
@@ -38,7 +53,7 @@ router.get("/share/:token", async (req: any, res) => {
       shareToken: recording.shareToken,
       tags: recording.tags,
       browserInfo: recording.browserInfo,
-      events: recording.events,
+      events: stripBodiesForShare(decryptEventsIfNeeded(recording.events)),
     });
   } catch (err) {
     req.log.error({ err }, "Failed to get shared recording");

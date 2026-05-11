@@ -159,6 +159,10 @@
   --sidebar-ring: 260 80% 65%;
 }
 
+@keyframes shimmer {
+  100% { transform: translateX(100%); }
+}
+
 @layer base {
   * {
     @apply border-border;

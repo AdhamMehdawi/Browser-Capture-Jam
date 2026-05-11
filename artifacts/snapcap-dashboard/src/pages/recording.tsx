@@ -522,62 +522,6 @@ export default function RecordingViewer() {
                         trimEndMs={trimActive ? trimEnd : undefined}
                       />
                     </div>
-                    {/* Trim Editor */}
-                    <div className="mt-3 bg-card border border-border rounded-lg p-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2 text-sm font-medium">
-                          <Scissors size={14} />
-                          <span>Trim</span>
-                          {trimActive && (
-                            <span className="text-xs text-muted-foreground font-mono">
-                              {fmtTime(trimStart)} – {fmtTime(trimEnd)}
-                            </span>
-                          )}
-                          {trimSaving && <span className="text-xs text-muted-foreground">Saving…</span>}
-                        </div>
-                        {trimActive && (
-                          <Button variant="ghost" size="sm" onClick={handleResetTrim} className="gap-1 text-xs h-7">
-                            <RotateCcw size={12} /> Reset
-                          </Button>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs text-muted-foreground font-mono w-10">{fmtTime(trimStart)}</span>
-                        <div className="flex-1 relative">
-                          {/* Start handle */}
-                          <input
-                            type="range"
-                            min={0}
-                            max={durationMs}
-                            step={100}
-                            value={trimStart}
-                            onChange={(e) => handleTrimChange(Math.min(Number(e.target.value), trimEnd - 500), trimEnd)}
-                            className="absolute inset-0 w-full appearance-none bg-transparent pointer-events-auto z-10 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded [&::-webkit-slider-thumb]:cursor-grab"
-                          />
-                          {/* End handle */}
-                          <input
-                            type="range"
-                            min={0}
-                            max={durationMs}
-                            step={100}
-                            value={trimEnd}
-                            onChange={(e) => handleTrimChange(trimStart, Math.max(Number(e.target.value), trimStart + 500))}
-                            className="absolute inset-0 w-full appearance-none bg-transparent pointer-events-auto z-10 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:bg-primary [&::-webkit-slider-thumb]:rounded [&::-webkit-slider-thumb]:cursor-grab"
-                          />
-                          {/* Visual track */}
-                          <div className="h-2 bg-muted rounded-full relative">
-                            <div
-                              className="absolute h-full bg-primary/30 rounded-full"
-                              style={{
-                                left: `${(trimStart / durationMs) * 100}%`,
-                                width: `${((trimEnd - trimStart) / durationMs) * 100}%`,
-                              }}
-                            />
-                          </div>
-                        </div>
-                        <span className="text-xs text-muted-foreground font-mono w-10 text-right">{fmtTime(trimEnd)}</span>
-                      </div>
-                    </div>
                   </div>
                 ) : screenshotUrl ? (
                   <div className="w-full">

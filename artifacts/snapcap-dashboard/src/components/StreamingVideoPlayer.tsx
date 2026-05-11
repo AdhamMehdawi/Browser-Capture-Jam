@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { Skeleton } from "@/components/ui/skeleton";
 import "plyr/dist/plyr.css";
 
 interface StreamingVideoPlayerProps {
@@ -19,10 +20,16 @@ export function StreamingVideoPlayer({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const plyrRef = useRef<{ destroy(): void } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
   const knownSec = knownDurationMs ? knownDurationMs / 1000 : 0;
   const trimStartSec = (trimStartMs ?? 0) / 1000;
   const trimEndSec = trimEndMs ? trimEndMs / 1000 : 0;
   const hasTrim = trimStartMs != null && trimEndMs != null;
+
+  // Reset ready state when URL changes
+  useEffect(() => {
+    setReady(false);
+  }, [videoUrl]);
 
   // Initialize Plyr when videoUrl changes
   useEffect(() => {
@@ -54,8 +61,6 @@ export function StreamingVideoPlayer({
         keyboard: { focused: true, global: false },
         tooltips: { controls: true, seek: true },
         seekTime: 5,
-        // Pass known duration so Plyr shows the correct timeline immediately
-        // without waiting for the browser to figure it out from the WebM file.
         ...(knownSec > 0 ? { duration: knownSec } : {}),
       });
       plyrRef.current = player;
@@ -103,15 +108,7 @@ export function StreamingVideoPlayer({
     };
   }, [hasTrim, trimStartSec, trimEndSec]);
 
-  // Fix WebM duration only AFTER the user first clicks play.
-  // MediaRecorder WebMs report duration=Infinity because they lack a
-  // Duration element in the EBML header. The workaround is to seek to
-  // a very large time, forcing the browser to walk the file to the last
-  // cluster. But doing this on loadedmetadata blocks playback because
-  // the browser must download the entire file first.
-  //
-  // Instead, we defer it: let the video play immediately, and fix the
-  // duration in the background after the first play event.
+  // Fix WebM duration fallback for old recordings without duration metadata
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -124,11 +121,9 @@ export function StreamingVideoPlayer({
         Number.isNaN(reported) ||
         (knownSec > 0 && reported < knownSec * 0.8)
       ) {
-        // Wait a moment so playback starts smoothly, then fix in background
         setTimeout(() => {
           const onSeeked = () => {
             v.removeEventListener("seeked", onSeeked);
-            // Restore playback position (the seek-to-end was invisible)
             v.currentTime = v.currentTime > 1e100 ? 0 : v.currentTime;
           };
           v.addEventListener("seeked", onSeeked);
@@ -153,17 +148,30 @@ export function StreamingVideoPlayer({
   };
 
   return (
-    <div className="bg-black relative w-full h-full plyr-container">
-      {!error ? (
-        <video
-          ref={videoRef}
-          src={videoUrl}
-          className="w-full h-full"
-          preload="auto"
-          onError={handleError}
-        />
-      ) : (
-        <div className="text-destructive text-sm p-6 text-center">
+    <div className="relative w-full aspect-video">
+      {/* Skeleton shown until video is ready */}
+      {!ready && !error && (
+        <Skeleton className="absolute inset-0 rounded-lg" />
+      )}
+
+      {/* Video player — hidden until ready, then fades in */}
+      <div
+        className={`plyr-container w-full h-full transition-opacity duration-300 ${ready ? "opacity-100" : "opacity-0"}`}
+      >
+        {!error ? (
+          <video
+            ref={videoRef}
+            src={videoUrl}
+            className="w-full h-full"
+            preload="auto"
+            onCanPlay={() => setReady(true)}
+            onError={handleError}
+          />
+        ) : null}
+      </div>
+
+      {error && (
+        <div className="absolute inset-0 flex items-center justify-center text-destructive text-sm">
           {error}
         </div>
       )}

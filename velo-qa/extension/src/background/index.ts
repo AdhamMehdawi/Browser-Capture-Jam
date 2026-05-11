@@ -668,20 +668,18 @@ async function handleRecordStop(): Promise<BgResponse> {
 }
 
 /**
- * Offscreen finished recording and committed all blocks to Azure.
+ * Offscreen finished recording, fixed WebM duration, and uploaded to Azure.
  * Video is already in blob storage — no binary data passes through here.
  * Show the preview modal and wait for the user's decision.
  */
 async function onUploadCompleteFromOffscreen(msg: {
   durationMs: number;
   bytes: number;
-  blockCount: number;
   note?: string;
 }): Promise<void> {
   console.log('[velocap/bg] upload-complete', {
     durationMs: msg.durationMs,
     bytes: msg.bytes,
-    blockCount: msg.blockCount,
     note: msg.note,
   });
   try {

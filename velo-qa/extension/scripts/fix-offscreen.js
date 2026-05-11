@@ -27,9 +27,9 @@ if (!offscreenJs) {
   process.exit(1);
 }
 
-// Read the JS content and remove the modulepreload import
+// Read the JS content and remove any modulepreload import (may appear mid-line)
 let jsContent = fs.readFileSync(path.join(assetsDir, offscreenJs), 'utf8');
-jsContent = jsContent.replace(/^import"[^"]*modulepreload[^"]*\.js";?/, '');
+jsContent = jsContent.replace(/import"[^"]*modulepreload[^"]*\.js";?/g, '');
 
 // Write the fixed JS file (overwrite the original)
 fs.writeFileSync(path.join(assetsDir, offscreenJs), jsContent);

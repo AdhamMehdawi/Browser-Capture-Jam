@@ -54,6 +54,8 @@ export function StreamingVideoPlayer({
         keyboard: { focused: true, global: false },
         tooltips: { controls: true, seek: true },
         seekTime: 5,
+        // Pass known duration so Plyr shows the correct timeline immediately
+        // without waiting for the browser to figure it out from the WebM file.
         ...(knownSec > 0 ? { duration: knownSec } : {}),
       });
       plyrRef.current = player;
@@ -83,7 +85,6 @@ export function StreamingVideoPlayer({
     };
 
     const handleSeeked = () => {
-      // After initial load, seek to trim start
       if (v.currentTime < trimStartSec) {
         v.currentTime = trimStartSec;
       }
@@ -92,7 +93,6 @@ export function StreamingVideoPlayer({
     v.addEventListener("timeupdate", handleTimeUpdate);
     v.addEventListener("loadedmetadata", handleSeeked);
 
-    // If already loaded, seek now
     if (v.readyState >= 1 && v.currentTime < trimStartSec) {
       v.currentTime = trimStartSec;
     }
@@ -103,27 +103,47 @@ export function StreamingVideoPlayer({
     };
   }, [hasTrim, trimStartSec, trimEndSec]);
 
-  // Fix duration for WebM files that report Infinity or wrong duration
-  const fixDuration = (v: HTMLVideoElement) => {
-    const reported = v.duration;
-    if (
-      !Number.isFinite(reported) ||
-      Number.isNaN(reported) ||
-      (knownSec > 0 && reported < knownSec * 0.8)
-    ) {
-      const onSeeked = () => {
-        v.removeEventListener("seeked", onSeeked);
-        v.currentTime = 0;
-      };
-      v.addEventListener("seeked", onSeeked);
-      v.currentTime = 1e101;
-    }
-  };
+  // Fix WebM duration only AFTER the user first clicks play.
+  // MediaRecorder WebMs report duration=Infinity because they lack a
+  // Duration element in the EBML header. The workaround is to seek to
+  // a very large time, forcing the browser to walk the file to the last
+  // cluster. But doing this on loadedmetadata blocks playback because
+  // the browser must download the entire file first.
+  //
+  // Instead, we defer it: let the video play immediately, and fix the
+  // duration in the background after the first play event.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+
+    const fixAfterPlay = () => {
+      v.removeEventListener("playing", fixAfterPlay);
+      const reported = v.duration;
+      if (
+        !Number.isFinite(reported) ||
+        Number.isNaN(reported) ||
+        (knownSec > 0 && reported < knownSec * 0.8)
+      ) {
+        // Wait a moment so playback starts smoothly, then fix in background
+        setTimeout(() => {
+          const onSeeked = () => {
+            v.removeEventListener("seeked", onSeeked);
+            // Restore playback position (the seek-to-end was invisible)
+            v.currentTime = v.currentTime > 1e100 ? 0 : v.currentTime;
+          };
+          v.addEventListener("seeked", onSeeked);
+          v.currentTime = 1e101;
+        }, 500);
+      }
+    };
+
+    v.addEventListener("playing", fixAfterPlay);
+    return () => v.removeEventListener("playing", fixAfterPlay);
+  }, [videoUrl, knownSec]);
 
   const handleError = () => {
     const v = videoRef.current;
     if (v?.error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED || v?.error?.code === MediaError.MEDIA_ERR_NETWORK) {
-      // SAS URL may have expired (403 from Azure)
       if (onExpired) {
         onExpired();
         return;
@@ -139,8 +159,7 @@ export function StreamingVideoPlayer({
           ref={videoRef}
           src={videoUrl}
           className="w-full h-full"
-          preload="metadata"
-          onLoadedMetadata={(e) => fixDuration(e.currentTarget)}
+          preload="auto"
           onError={handleError}
         />
       ) : (

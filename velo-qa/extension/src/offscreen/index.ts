@@ -2,58 +2,238 @@
 // stream, optionally mixed with microphone audio. MV3 service workers can't
 // own a MediaStream, so we do the heavy lifting here.
 //
-// Streaming upload: chunks are uploaded directly to Azure via SAS URL during
-// recording (Put Block per second). On stop, Put Block List commits them into
-// a single playable blob. No base64, no dataUrl, no sendMessage size limits.
+// On stop: assembles the full blob, fixes WebM duration metadata via
+// fix-webm-duration, saves to IndexedDB for instant preview, then uploads
+// the fixed blob to Azure as a single PUT.
 
-// Inline azure upload functions — the offscreen doc is loaded as a non-module
+// Inline azure upload function — the offscreen doc is loaded as a non-module
 // script (CRXJS strips type="module"), so static imports break at runtime.
 
-function _blockId(index: number): string {
-  return btoa(String(index).padStart(6, '0'));
-}
-
-async function putBlock(sasUrl: string, index: number, data: Blob): Promise<void> {
-  const id = _blockId(index);
+async function putBlobSingle(
+  sasUrl: string,
+  data: Blob,
+  contentType: string,
+): Promise<void> {
   const sep = sasUrl.includes('?') ? '&' : '?';
-  const url = `${sasUrl}${sep}comp=block&blockid=${encodeURIComponent(id)}`;
+  const url = `${sasUrl}${sep}`;
   let lastErr: Error | null = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const res = await fetch(url, {
         method: 'PUT',
-        headers: { 'x-ms-blob-type': 'BlockBlob', 'Content-Length': String(data.size) },
+        headers: {
+          'x-ms-blob-type': 'BlockBlob',
+          'Content-Type': contentType,
+          'Content-Length': String(data.size),
+        },
         body: data,
       });
       if (res.ok) return;
-      lastErr = new Error(`PUT Block ${index} failed: ${res.status} ${res.statusText}`);
+      lastErr = new Error(`PUT Blob failed: ${res.status} ${res.statusText}`);
     } catch (e) {
       lastErr = e instanceof Error ? e : new Error(String(e));
     }
     if (attempt < 2) await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)));
   }
-  throw lastErr ?? new Error(`PUT Block ${index} failed after retries`);
+  throw lastErr ?? new Error('PUT Blob failed after retries');
 }
 
-async function putBlockList(sasUrl: string, blockCount: number): Promise<void> {
-  const ids = Array.from({ length: blockCount }, (_, i) => _blockId(i));
-  const xml = [
-    '<?xml version="1.0" encoding="utf-8"?>',
-    '<BlockList>',
-    ...ids.map((id) => `  <Latest>${id}</Latest>`),
-    '</BlockList>',
-  ].join('\n');
-  const sep = sasUrl.includes('?') ? '&' : '?';
-  const url = `${sasUrl}${sep}comp=blocklist`;
-  const res = await fetch(url, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/xml', 'x-ms-blob-content-type': 'video/webm' },
-    body: xml,
+/**
+ * Fix WebM duration metadata. MediaRecorder produces WebMs without a Duration
+ * element in the EBML header, making them non-seekable. This patches the blob
+ * with the correct duration so browsers can seek and show progress immediately.
+ *
+ * Inlined from fix-webm-duration (MIT) because the offscreen document runs as
+ * a classic script (CRXJS strips type="module"), so import() is unavailable.
+ */
+function fixWebmDurationMetadata(blob: Blob, durationMs: number): Promise<Blob> {
+  return new Promise((resolve) => {
+    try {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        try {
+          const buf = new Uint8Array(reader.result as ArrayBuffer);
+          const file = new EBMLContainer('File', 'File');
+          file.setSource(buf);
+          if (fixDurationInEBML(file, durationMs)) {
+            const fixed = new Blob([file.source.buffer], { type: blob.type || 'video/webm' });
+            console.log('[velocap/offscreen] WebM duration fixed', {
+              original: blob.size,
+              fixed: fixed.size,
+            });
+            resolve(fixed);
+          } else {
+            resolve(blob);
+          }
+        } catch (e) {
+          console.warn('[velocap/offscreen] fix-webm-duration failed', e);
+          resolve(blob);
+        }
+      };
+      reader.readAsArrayBuffer(blob);
+    } catch (e) {
+      console.warn('[velocap/offscreen] fix-webm-duration failed', e);
+      resolve(blob);
+    }
   });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Put Block List failed: ${res.status} ${res.statusText} — ${body}`);
+}
+
+// Minimal EBML parser/writer inlined from fix-webm-duration (MIT license).
+// Only the sections needed for Duration patching are included.
+const EBML_SECTIONS: Record<number, { name: string; type: string }> = {
+  0xa45dfa3: { name: 'EBML', type: 'Container' },
+  0x8538067: { name: 'Segment', type: 'Container' },
+  0x549a966: { name: 'Info', type: 'Container' },
+  0xad7b1: { name: 'TimecodeScale', type: 'Uint' },
+  0x489: { name: 'Duration', type: 'Float' },
+};
+
+class EBMLElement {
+  name: string;
+  type: string;
+  source!: Uint8Array;
+  data: any;
+  constructor(name: string, type: string) {
+    this.name = name;
+    this.type = type;
   }
+  updateBySource() {}
+  setSource(s: Uint8Array) { this.source = s; this.updateBySource(); }
+  updateByData() {}
+  setData(d: any) { this.data = d; this.updateByData(); }
+}
+
+class EBMLUint extends EBMLElement {
+  constructor(name: string) { super(name, 'Uint'); }
+  updateBySource() {
+    let hex = '';
+    for (let i = 0; i < this.source.length; i++) hex += this.source[i].toString(16).padStart(2, '0');
+    this.data = hex;
+  }
+  updateByData() {
+    const len = this.data.length / 2;
+    this.source = new Uint8Array(len);
+    for (let i = 0; i < len; i++) this.source[i] = parseInt(this.data.substr(i * 2, 2), 16);
+  }
+  getValue() { return parseInt(this.data, 16); }
+  setValue(v: number) {
+    let h = v.toString(16);
+    if (h.length % 2) h = '0' + h;
+    this.setData(h);
+  }
+}
+
+class EBMLFloat extends EBMLElement {
+  constructor(name: string) { super(name, 'Float'); }
+  updateBySource() {
+    const rev = new Uint8Array(this.source).reverse();
+    const FA = this.source.length === 4 ? Float32Array : Float64Array;
+    this.data = new FA(rev.buffer)[0];
+  }
+  updateByData() {
+    const FA = (this.source && this.source.length === 4) ? Float32Array : Float64Array;
+    const arr = new FA([this.data]);
+    this.source = new Uint8Array(arr.buffer).reverse();
+  }
+  getValue() { return this.data; }
+  setValue(v: number) { this.setData(v); }
+}
+
+class EBMLContainer extends EBMLElement {
+  offset = 0;
+  constructor(name: string, type: string) { super(name, type || 'Container'); }
+
+  readByte() { return this.source[this.offset++]; }
+  readUint() {
+    const first = this.readByte();
+    const len = 8 - first.toString(2).length;
+    let val = first - (1 << (7 - len));
+    for (let i = 0; i < len; i++) { val = val * 256 + this.readByte(); }
+    return val;
+  }
+
+  updateBySource() {
+    this.data = [];
+    this.offset = 0;
+    while (this.offset < this.source.length) {
+      const id = this.readUint();
+      const size = this.readUint();
+      const end = Math.min(this.offset + size, this.source.length);
+      const payload = this.source.slice(this.offset, end);
+      const sec = EBML_SECTIONS[id] || { name: 'Unknown', type: 'Unknown' };
+      let el: EBMLElement;
+      switch (sec.type) {
+        case 'Container': el = new EBMLContainer(sec.name, sec.type); break;
+        case 'Uint': el = new EBMLUint(sec.name); break;
+        case 'Float': el = new EBMLFloat(sec.name); break;
+        default: el = new EBMLElement(sec.name, sec.type); break;
+      }
+      el.setSource(payload);
+      this.data.push({ id, data: el });
+      this.offset = end;
+    }
+  }
+
+  writeUint(val: number, draft?: string) {
+    let len = 1, limit = 128;
+    while (val >= limit && len < 8) { len++; limit *= 128; }
+    if (!draft) {
+      let acc = limit + val;
+      for (let i = len - 1; i >= 0; i--) {
+        this.source[this.offset + i] = acc % 256;
+        acc = (acc - acc % 256) / 256;
+      }
+    }
+    this.offset += len;
+  }
+
+  writeSections(draft?: string) {
+    this.offset = 0;
+    for (const sec of this.data) {
+      const payload = sec.data.source;
+      this.writeUint(sec.id, draft);
+      this.writeUint(payload.length, draft);
+      if (!draft) this.source.set(payload, this.offset);
+      this.offset += payload.length;
+    }
+    return this.offset;
+  }
+
+  updateByData() {
+    const size = this.writeSections('draft');
+    this.source = new Uint8Array(size);
+    this.writeSections();
+  }
+
+  getSectionById(id: number): any {
+    for (const sec of this.data) { if (sec.id === id) return sec.data; }
+    return null;
+  }
+}
+
+function fixDurationInEBML(file: EBMLContainer, durationMs: number): boolean {
+  const segment = file.getSectionById(0x8538067) as EBMLContainer | null;
+  if (!segment) return false;
+  const info = segment.getSectionById(0x549a966) as EBMLContainer | null;
+  if (!info) return false;
+  const timecodeScale = info.getSectionById(0xad7b1) as EBMLUint | null;
+  if (!timecodeScale) return false;
+
+  let duration = info.getSectionById(0x489) as EBMLFloat | null;
+  if (duration) {
+    if (duration.getValue() > 0) return false; // already has valid duration
+    duration.setValue(durationMs);
+  } else {
+    duration = new EBMLFloat('Duration');
+    duration.setValue(durationMs);
+    info.data.push({ id: 0x489, data: duration });
+  }
+
+  timecodeScale.setValue(1_000_000);
+  info.updateByData();
+  segment.updateByData();
+  file.updateByData();
+  return true;
 }
 
 // Inline IndexedDB helper — save recording blob for instant preview.
@@ -101,7 +281,6 @@ type UploadCompleteMsg = {
   kind: 'upload-complete';
   durationMs: number;
   bytes: number;
-  blockCount: number;
   note?: string;
 };
 type ErrorMsg = { target: 'bg'; kind: 'recorder-error'; message: string };
@@ -115,12 +294,8 @@ interface Session {
   startedAt: number;
   mimeType: string;
   note?: string;
-  // Streaming upload state
   uploadSasUrl: string;
-  blockIndex: number;
-  uploadQueue: Promise<void>;
   totalBytes: number;
-  failedBlocks: number[];
 }
 
 let session: Session | null = null;
@@ -293,17 +468,8 @@ async function start(msg: StartMsg): Promise<void> {
     console.log('[velocap/offscreen] ondataavailable:', e.data.size, 'bytes');
     if (!e.data.size) return;
     chunks.push(e.data);
-    // Stream this chunk to Azure
-    const s = session;
-    if (s) {
-      const idx = s.blockIndex++;
-      s.totalBytes += e.data.size;
-      s.uploadQueue = s.uploadQueue
-        .then(() => putBlock(s.uploadSasUrl, idx, e.data))
-        .catch((err) => {
-          console.error(`[velocap/offscreen] putBlock ${idx} failed:`, err);
-          s.failedBlocks.push(idx);
-        });
+    if (session) {
+      session.totalBytes += e.data.size;
     }
   };
 
@@ -327,48 +493,35 @@ async function start(msg: StartMsg): Promise<void> {
       const durationMs = Date.now() - s.startedAt;
       console.log('[velocap/offscreen] finalizing', {
         chunkCount: chunks.length,
-        blockIndex: s.blockIndex,
         totalBytes: s.totalBytes,
-        failedBlocks: s.failedBlocks,
       });
 
-      // Wait for all pending block uploads to complete
-      await s.uploadQueue;
-      console.log('[velocap/offscreen] all blocks uploaded');
+      // 1. Assemble full blob from chunks
+      const actualMime = chunks[0]?.type || s.mimeType || 'video/webm';
+      const fullBlob = new Blob(chunks, { type: actualMime });
 
-      // Retry any failed blocks from local chunks
-      for (const idx of s.failedBlocks) {
-        if (chunks[idx]) {
-          console.log(`[velocap/offscreen] retrying failed block ${idx}`);
-          try {
-            await putBlock(s.uploadSasUrl, idx, chunks[idx]);
-          } catch (err) {
-            console.error(`[velocap/offscreen] retry block ${idx} failed:`, err);
-            throw new Error(`Block ${idx} failed after retry — upload incomplete`);
-          }
-        }
-      }
+      // 2. Fix WebM duration metadata (makes video instantly seekable)
+      const blobToUpload = actualMime.includes('webm') && durationMs > 0
+        ? await fixWebmDurationMetadata(fullBlob, durationMs)
+        : fullBlob;
 
-      // Commit all blocks into a single blob
-      await putBlockList(s.uploadSasUrl, s.blockIndex);
-      console.log('[velocap/offscreen] block list committed');
-
-      // Save blob to IndexedDB for instant preview (non-fatal if it fails)
+      // 3. Save fixed blob to IndexedDB for instant preview (non-fatal)
       try {
-        const actualMime = chunks[0]?.type || s.mimeType || 'video/webm';
-        const fullBlob = new Blob(chunks, { type: actualMime });
-        await _saveBlob('pending-recording', fullBlob);
-        console.log('[velocap/offscreen] saved to IndexedDB', { size: fullBlob.size });
+        await _saveBlob('pending-recording', blobToUpload);
+        console.log('[velocap/offscreen] saved to IndexedDB', { size: blobToUpload.size });
       } catch (e) {
         console.warn('[velocap/offscreen] IndexedDB save failed (preview will use Azure URL)', e);
       }
+
+      // 4. Upload the fixed blob to Azure as a single PUT
+      await putBlobSingle(s.uploadSasUrl, blobToUpload, actualMime);
+      console.log('[velocap/offscreen] blob uploaded to Azure', { size: blobToUpload.size });
 
       await chrome.runtime.sendMessage({
         target: 'bg',
         kind: 'upload-complete',
         durationMs,
-        bytes: s.totalBytes,
-        blockCount: s.blockIndex,
+        bytes: blobToUpload.size,
         ...(s.note ? { note: s.note } : {}),
       } satisfies UploadCompleteMsg);
     } catch (err) {
@@ -395,17 +548,13 @@ async function start(msg: StartMsg): Promise<void> {
     startedAt: Date.now(),
     mimeType,
     uploadSasUrl: msg.uploadSasUrl,
-    blockIndex: 0,
-    uploadQueue: Promise.resolve(),
     totalBytes: 0,
-    failedBlocks: [],
     ...(note ? { note } : {}),
   };
 
-  // 1-second timeslice: each chunk is uploaded to Azure as a block during
-  // recording. On stop, Put Block List commits all blocks into a single blob.
+  // 1-second timeslice: chunks collected locally, uploaded as one blob on stop.
   recorder.start(1000);
-  console.log('[velocap/offscreen] recorder started (1s timeslice, streaming to Azure)');
+  console.log('[velocap/offscreen] recorder started (1s timeslice)');
 }
 
 function stop(): void {

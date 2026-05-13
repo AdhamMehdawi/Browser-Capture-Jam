@@ -301,16 +301,26 @@ interface Session {
 let session: Session | null = null;
 
 function pickMime(): string {
-  // Fix Issue 11: prefer VP9 over VP8 — same bitrate, ~30 % sharper image.
-  // Chrome resolves bare `video/webm` to VP8, so we have to be explicit.
-  // Fall back through the chain on the rare browser that lacks VP9.
+  // Prefer MP4/H.264 so Safari can play recordings directly from the share
+  // page — Chrome's MediaRecorder shipped MP4 support in Chrome 130+ via
+  // https://chromestatus.com/feature/5163469011943424. Falls back to VP9
+  // WebM (sharp + small) and then VP8 on the rare browser that lacks both.
+  //
+  // Order matters:
+  //   1. MP4 Main profile + AAC — best quality, hardware-accelerated, plays
+  //      everywhere including Safari + QuickTime.
+  //   2. MP4 Baseline + AAC — older H.264 profile, broader hw decode coverage.
+  //   3. WebM VP9 — Chrome legacy path; ~30 % sharper than VP8 at same bitrate.
+  //   4. WebM VP8 — last resort.
   const candidates = [
+    'video/mp4;codecs="avc1.4D0028,mp4a.40.2"',
+    'video/mp4;codecs="avc1.42E01E,mp4a.40.2"',
+    'video/mp4',
     'video/webm;codecs=vp9,opus',
     'video/webm;codecs=vp9',
     'video/webm;codecs=vp8,opus',
     'video/webm;codecs=vp8',
     'video/webm',
-    'video/mp4',
   ];
   for (const c of candidates) {
     if (MediaRecorder.isTypeSupported(c)) return c;
@@ -459,11 +469,16 @@ async function start(msg: StartMsg): Promise<void> {
   ]);
 
   const mimeType = pickMime();
-  // Fix Issue 11: 2 Mbps was way too low — at 1080p it produced blocky / blurry
-  // playback. Bump defaults to industry-typical ranges (Loom ~4–6 Mbps for
-  // tab, YouTube minimum 8 Mbps for 1080p30). Use higher for full-display
-  // captures since the source resolution is usually larger.
-  const videoBitsPerSecond = msg.source === 'display' ? 8_000_000 : 5_000_000;
+  // Issue 11 (round 3): bump MP4 bitrate again — even at 8/12 Mbps, H.264
+  // looks soft on screen captures with small text. Going to 12/20 Mbps
+  // matches what Loom uses for tab captures and gives sharp text edges.
+  // File size cost: ~150 KB/s for tab, ~250 KB/s for display — a 1-minute
+  // recording is ~9 MB tab / 15 MB display. Still very reasonable.
+  const isMp4 = mimeType.startsWith('video/mp4');
+  const videoBitsPerSecond =
+    msg.source === 'display'
+      ? (isMp4 ? 20_000_000 : 10_000_000)
+      : (isMp4 ? 12_000_000 : 6_000_000);
   // Audio bitrate stays — 128 kbps is already fine for speech.
   const audioBitsPerSecond = 128_000;
 
@@ -639,7 +654,7 @@ self.onunhandledrejection = (event) => {
 };
 
 chrome.runtime.onMessage.addListener(
-  (msg: StartMsg | StopMsg | { target: 'offscreen'; kind: 'ping' }, _sender, sendResponse) => {
+  (msg: StartMsg | StopMsg | { target: 'offscreen'; kind: 'ping' | 'pickMime' }, _sender, sendResponse) => {
     // Ignore messages not targeted at offscreen - return false to not interfere
     if (msg?.target !== 'offscreen') {
       return false;
@@ -648,6 +663,15 @@ chrome.runtime.onMessage.addListener(
     if (msg.kind === 'ping') {
       console.log('[velocap/offscreen] responding to ping');
       sendResponse({ ok: true });
+      return false;
+    }
+    if (msg.kind === 'pickMime') {
+      // Background needs to know the file extension before calling /uploads/init,
+      // but MediaRecorder isn't available in MV3 service workers — only in the
+      // offscreen document. Return both the chosen mimeType and a matching ext.
+      const mimeType = pickMime();
+      const ext = mimeType.startsWith('video/mp4') ? 'mp4' : 'webm';
+      sendResponse({ mimeType, ext });
       return false;
     }
     if (msg.kind === 'start') {

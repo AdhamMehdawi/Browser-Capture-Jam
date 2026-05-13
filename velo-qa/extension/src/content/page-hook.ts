@@ -168,6 +168,179 @@ document.addEventListener(
   true, // capture phase — see events even if the page stops propagation
 );
 
+// ============================================================
+// Issue 12 — extra UI events (mouse motion, wheel, keys, focus,
+// visibility). All passive listeners with strict throttling so
+// they can't degrade page performance (Issue 2 protection).
+// ============================================================
+
+// --- mousemove: sampled at ~30 Hz via requestAnimationFrame ---
+// Keep only the LAST mouse position per animation frame. On a 60 Hz monitor
+// this yields ~60 samples/sec native; we step down to 30 with a toggle.
+{
+  let pendingX = 0;
+  let pendingY = 0;
+  let pending = false;
+  let frameToggle = false;
+  const flush = () => {
+    pending = false;
+    // Sample every OTHER frame ≈ 30 Hz on a 60 Hz monitor.
+    frameToggle = !frameToggle;
+    if (frameToggle) return;
+    post('action', {
+      type: 'mousemove',
+      x: pendingX,
+      y: pendingY,
+      url: location.href,
+      timestamp: Date.now(),
+    });
+  };
+  document.addEventListener(
+    'mousemove',
+    (e) => {
+      if ((e as MouseEvent).isTrusted === false) return;
+      pendingX = e.clientX;
+      pendingY = e.clientY;
+      if (!pending) {
+        pending = true;
+        requestAnimationFrame(flush);
+      }
+    },
+    { capture: true, passive: true },
+  );
+}
+
+// --- mousedown / mouseup ---
+for (const evt of ['mousedown', 'mouseup'] as const) {
+  document.addEventListener(
+    evt,
+    (e) => {
+      const me = e as MouseEvent;
+      if (me.isTrusted === false) return;
+      const el = resolveEventTarget(e);
+      if (el && isOwnUi(el)) return;
+      post('action', {
+        type: evt,
+        x: me.clientX,
+        y: me.clientY,
+        button: me.button,
+        ...(el ? { target: targetMeta(el) } : {}),
+        url: location.href,
+        timestamp: Date.now(),
+      });
+    },
+    { capture: true, passive: true },
+  );
+}
+
+// --- wheel: debounced 150ms so a flick of the wheel = 1 event, not 60 ---
+{
+  let lastEmitted = 0;
+  let acc = { dx: 0, dy: 0 };
+  document.addEventListener(
+    'wheel',
+    (e) => {
+      const we = e as WheelEvent;
+      if (we.isTrusted === false) return;
+      acc.dx += we.deltaX;
+      acc.dy += we.deltaY;
+      const now = Date.now();
+      if (now - lastEmitted < 150) return;
+      lastEmitted = now;
+      const scrollTop = window.scrollY || document.documentElement.scrollTop || 0;
+      post('action', {
+        type: 'wheel',
+        deltaX: Math.round(acc.dx),
+        deltaY: Math.round(acc.dy),
+        scrollTop,
+        url: location.href,
+        timestamp: now,
+      });
+      acc = { dx: 0, dy: 0 };
+    },
+    { capture: true, passive: true },
+  );
+}
+
+// --- keydown: non-typing keys only (privacy: never record text input) ---
+const NON_TYPING_KEYS = new Set([
+  'Tab', 'Enter', 'Escape', 'Backspace', 'Delete',
+  'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+  'PageUp', 'PageDown', 'Home', 'End',
+  'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12',
+]);
+document.addEventListener(
+  'keydown',
+  (e) => {
+    const ke = e as KeyboardEvent;
+    if (ke.isTrusted === false) return;
+    // Hard-block: never record any keydown while typing into an input,
+    // textarea, or contenteditable — even non-printable keys we'd
+    // otherwise allow (someone hitting Enter to submit a password form
+    // could leak timing info if combined with other signals).
+    const t = ke.target as Element | null;
+    if (t && (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || (t as HTMLElement).isContentEditable)) {
+      return;
+    }
+    // Allow modifier+letter shortcuts (e.g. Cmd+S, Ctrl+K) but not bare
+    // printable letters (would be typing).
+    const printable = ke.key.length === 1 && !ke.ctrlKey && !ke.metaKey;
+    if (!NON_TYPING_KEYS.has(ke.key) && printable) return;
+    post('action', {
+      type: 'keydown',
+      key: ke.key,
+      ctrl: ke.ctrlKey || undefined,
+      shift: ke.shiftKey || undefined,
+      alt: ke.altKey || undefined,
+      meta: ke.metaKey || undefined,
+      url: location.href,
+      timestamp: Date.now(),
+    });
+  },
+  { capture: true, passive: true },
+);
+
+// --- focus / blur (delegated; only meaningful elements) ---
+for (const evt of ['focus', 'blur'] as const) {
+  document.addEventListener(
+    evt,
+    (e) => {
+      const el = e.target as Element | null;
+      if (!el || !(el instanceof Element)) return;
+      if (isOwnUi(el)) return;
+      // Only emit for interactive elements — otherwise it's spam from
+      // window/document focus changes.
+      if (!(el instanceof HTMLInputElement) && !(el instanceof HTMLTextAreaElement) && !(el instanceof HTMLSelectElement) && !(el instanceof HTMLButtonElement)) {
+        return;
+      }
+      const { primary } = buildSelectors(el);
+      post('action', {
+        type: evt,
+        selector: primary,
+        target: targetMeta(el),
+        state: evt,
+        url: location.href,
+        timestamp: Date.now(),
+      });
+    },
+    true, // capture phase: focus events don't bubble by default
+  );
+}
+
+// --- page visibility ---
+document.addEventListener(
+  'visibilitychange',
+  () => {
+    post('action', {
+      type: 'visibility',
+      state: document.hidden ? 'hidden' : 'visible',
+      url: location.href,
+      timestamp: Date.now(),
+    });
+  },
+  { passive: true },
+);
+
 // --- input (debounced per element) ---
 const inputFlushTimers = new WeakMap<Element, number>();
 const inputFinalValues = new WeakMap<Element, string>();
@@ -355,6 +528,15 @@ window.addEventListener('unhandledrejection', (e) => {
 // ---- fetch ----
 const BODY_CAP = 50_000; // chars — enough to debug most JSON / form payloads
 
+// Fix Issue 13: hosts/paths known to use streaming media or byte-range fetches.
+// We skip even the metadata log to avoid any chance of disturbing MSE-based
+// players. The user is virtually never debugging a bug "inside the YouTube
+// player" via VeloCap, so this is pure noise reduction.
+const MEDIA_HOST_DENYLIST = /(\.googlevideo\.com|\.youtube\.com\/(api\/stats|videoplayback)|\.ytimg\.com\/sb\/|\.vimeocdn\.com|\.cloudfront\.net\/.*\.m3u8|\.cloudfront\.net\/.*\.ts)/i;
+function shouldSkipNetworkLogging(url: string): boolean {
+  return MEDIA_HOST_DENYLIST.test(url);
+}
+
 // Whitelist by inversion — anything that's NOT known-binary is tried as
 // text. This covers custom types like `application/vnd.xxx+json`,
 // `application/ld+json`, `application/problem+json`, APIs that send no
@@ -391,22 +573,17 @@ async function readRequestBody(init?: RequestInit | Request): Promise<string | u
   return '[unreadable body]';
 }
 
-async function readResponseBody(res: Response): Promise<string | undefined> {
+// Fix Issue 13: NEVER read response bodies. The previous implementation called
+// `res.clone().text()` to capture the body for bug-report logging, but this
+// breaks any site using streaming responses (MSE-based video players like
+// YouTube/Vimeo, long-poll endpoints, server-sent events). Even cloning races
+// with the page's own consumer on large chunks. We now record only a size
+// summary so the network panel still has useful metadata.
+function summarizeResponse(res: Response): string | undefined {
   const ct = res.headers.get('content-type') || '';
-  if (!isTextualContentType(ct)) {
-    // Known binary — just note the size, never pull the bytes into memory.
-    const len = res.headers.get('content-length');
-    return len ? `[${ct || 'binary'} ${len}B]` : `[${ct || 'binary'}]`;
-  }
-  try {
-    // Must clone — reading the body on the live response would drain it for
-    // the page's own consumer and break the app we're recording.
-    const text = await res.clone().text();
-    if (!text) return undefined; // empty body — don't crowd the UI
-    return truncate(text);
-  } catch {
-    return '[body not readable]';
-  }
+  const len = res.headers.get('content-length');
+  if (!ct && !len) return undefined;
+  return len ? `[${ct || 'response'} ${len}B]` : `[${ct || 'response'}]`;
 }
 
 const originalFetch = window.fetch;
@@ -414,18 +591,60 @@ window.fetch = async function patchedFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
 ): Promise<Response> {
+  // Fast path: known-streaming media URLs are passed straight through with
+  // no instrumentation. Cheapest possible behaviour for sites we know we'd
+  // only get noise from.
+  const reqUrl =
+    typeof input === 'string'
+      ? input
+      : input instanceof URL
+        ? input.toString()
+        : input?.url ?? '';
+  if (shouldSkipNetworkLogging(reqUrl)) {
+    return originalFetch(input as RequestInfo, init);
+  }
   const id = `f_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const startedAt = Date.now();
-  const req = new Request(input as RequestInfo, init);
+  // Fix Issue 13 (real cause): previously this wrapper constructed
+  // `new Request(input, init)` to read headers via `req.headers.forEach`.
+  // `new Request(...)` *consumes* `init.body` when it's a ReadableStream
+  // (and locks FormData with files), so the subsequent real `fetch(input,
+  // init)` got an empty/locked body and failed → YouTube interpreted the
+  // cascading failures as "You're offline."
+  //
+  // Now we read headers from sources we know are safe to inspect (init.headers
+  // when init is provided, or input.headers when input is already a Request).
+  // The original input/init are passed to fetch UNTOUCHED.
   const rawRequestHeaders: Record<string, string> = {};
-  req.headers.forEach((v, k) => (rawRequestHeaders[k] = v));
+  try {
+    let h: Headers | undefined;
+    if (init?.headers) {
+      h = new Headers(init.headers);
+    } else if (input instanceof Request) {
+      h = input.headers;
+    }
+    h?.forEach((v, k) => (rawRequestHeaders[k] = v));
+  } catch {
+    // Header collection is best-effort. Never let it block the request.
+  }
   const requestHeaders = sanitizeHeaders(rawRequestHeaders);
-  const requestBody = sanitizeBody(await readRequestBody(init).catch(() => undefined));
+  // Request body capture: only safe types (string, URLSearchParams).
+  // Skip Blob/FormData/ReadableStream — reading them risks consuming.
+  let requestBody: string | undefined;
+  const initBody = init?.body;
+  if (typeof initBody === 'string') {
+    requestBody = sanitizeBody(truncate(initBody));
+  } else if (initBody instanceof URLSearchParams) {
+    requestBody = sanitizeBody(truncate(initBody.toString()));
+  } else if (initBody) {
+    requestBody = `[${(initBody as Blob).constructor?.name ?? 'body'}]`;
+  }
+  const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
   post('network-start', {
     id,
     type: 'fetch',
-    method: req.method,
-    url: req.url,
+    method,
+    url: reqUrl,
     requestHeaders,
     requestBody,
     startedAt,
@@ -435,26 +654,17 @@ window.fetch = async function patchedFetch(
     const rawResponseHeaders: Record<string, string> = {};
     res.headers.forEach((v, k) => (rawResponseHeaders[k] = v));
     const responseHeaders = sanitizeHeaders(rawResponseHeaders);
-    // Read the response body off a clone — never touch the one returned to
-    // the caller. Handle async read errors silently.
-    readResponseBody(res).then((rawBody) => {
-      const responseBody = sanitizeBody(rawBody);
-      post('network-end', {
-        id,
-        status: res.status,
-        statusText: res.statusText,
-        responseHeaders,
-        responseBody,
-        durationMs: Date.now() - startedAt,
-      });
-    }).catch(() => {
-      post('network-end', {
-        id,
-        status: res.status,
-        statusText: res.statusText,
-        responseHeaders,
-        durationMs: Date.now() - startedAt,
-      });
+    // Fix Issue 13: synchronous metadata-only summary. We never touch
+    // `res.clone()`, `res.body`, or `.text()` — those break streaming
+    // sites like YouTube. The returned response is handed straight to the
+    // page's consumer untouched.
+    post('network-end', {
+      id,
+      status: res.status,
+      statusText: res.statusText,
+      responseHeaders,
+      responseBody: sanitizeBody(summarizeResponse(res)),
+      durationMs: Date.now() - startedAt,
     });
     return res;
   } catch (e) {
@@ -478,11 +688,17 @@ function PatchedXHR(this: XMLHttpRequest) {
   let url = '';
   const requestHeaders: Record<string, string> = {};
 
+  let skip = false;
   const origOpen = xhr.open.bind(xhr);
   xhr.open = function (m: string, u: string | URL, ...rest: unknown[]) {
     method = m;
     url = typeof u === 'string' ? u : u.toString();
-    id = `x_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    // Fix Issue 13: same denylist as fetch — don't instrument streaming
+    // media chunks. `skip` propagates to send/loadend handlers below.
+    skip = shouldSkipNetworkLogging(url);
+    if (!skip) {
+      id = `x_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    }
     // @ts-expect-error variadic passthrough
     return origOpen(m, u, ...rest);
   };
@@ -495,6 +711,7 @@ function PatchedXHR(this: XMLHttpRequest) {
 
   const origSend = xhr.send.bind(xhr);
   xhr.send = function (body?: Document | XMLHttpRequestBodyInit | null) {
+    if (skip) return origSend(body);
     startedAt = Date.now();
     // Synchronously stringify the request body before send — a single
     // effort, matches fetch's captured request body behavior.
@@ -529,19 +746,17 @@ function PatchedXHR(this: XMLHttpRequest) {
         const [k, ...rest] = line.split(': ');
         if (k && rest.length) responseHeaders[k.toLowerCase()] = rest.join(': ');
       });
-      // Only read responseText for text-like response types to avoid
-      // pulling binary into memory.
-      let responseBody: string | undefined;
-      try {
-        if (!xhr.responseType || xhr.responseType === 'text' || xhr.responseType === 'json') {
-          const t = xhr.responseText;
-          if (t) responseBody = truncate(t);
-        } else {
-          responseBody = `[${xhr.responseType}]`;
-        }
-      } catch {
-        // Some cross-origin XHRs throw on responseText access.
-      }
+      // Fix Issue 13: NEVER touch xhr.responseText. On large binary or
+      // streaming responses this is hot-path expensive AND on some pages
+      // accessing it is enough to disturb the consumer (especially when
+      // xhr.responseType wasn't set explicitly). Just summarize.
+      const ct = responseHeaders['content-type'] || '';
+      const len = responseHeaders['content-length'];
+      const responseBody = ct || len
+        ? len
+          ? `[${ct || 'response'} ${len}B]`
+          : `[${ct || 'response'}]`
+        : undefined;
       post('network-end', {
         id,
         status: xhr.status || null,

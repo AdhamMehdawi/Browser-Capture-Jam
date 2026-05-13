@@ -380,6 +380,48 @@ Right now only `click / input / select / submit / navigation` are captured ([vel
 
 ---
 
+## Issue 13 — Extension breaks YouTube playback (and likely other sites) even when idle
+
+### Symptoms
+With the VeloCap extension installed but **not** actively recording, YouTube videos won't play — blank player or stuck spinner. User reports this affects YouTube and "other sites" they aren't sure about yet. Removing the extension makes it work again.
+
+### Suspected code paths
+- [velo-qa/extension/src/content/page-hook.ts](velo-qa/extension/src/content/page-hook.ts) — runs in `world: 'MAIN'` on every page (`<all_urls>` pattern in manifest), patches `console`, `fetch`, and `XMLHttpRequest` from `document_start`. **This is the prime suspect** — YouTube is sensitive to anything that wraps `fetch`/`XHR` because it uses MSE (Media Source Extensions) with byte-range requests and streaming responses.
+- [velo-qa/extension/src/content/index.ts](velo-qa/extension/src/content/index.ts) — content script that adds listeners and forwards events.
+- [velo-qa/extension/src/manifest.config.ts](velo-qa/extension/src/manifest.config.ts) — `host_permissions`, content-script `matches`, etc.
+
+### Likely root causes (in order)
+1. **`fetch` monkey-patch breaks streaming responses.** Our wrapper at [page-hook.ts](velo-qa/extension/src/content/page-hook.ts) calls `response.clone().text()` or similar to capture body for logging. On YouTube's media requests this either consumes the body the player needs, races with `ReadableStream` locking, or breaks `Content-Length` / range-request semantics.
+2. **`XMLHttpRequest` wrapper captures `responseText`** for logging. On large binary media responses this is hot-path expensive and may corrupt the consumer's view of the response.
+3. **Page-hook serialises huge request/response payloads** synchronously, which can stall YouTube's player loop enough to time-out its own watchdogs.
+4. **The recording overlay's shadow-DOM injection** runs even when not recording? Unlikely — overlay is BG-triggered — but worth confirming.
+5. **Manifest `host_permissions: <all_urls>`** is too broad; YouTube can be excluded if our value-add doesn't justify the breakage. (Last-resort: ship an allowlist of host patterns where the extension activates, like Loom does.)
+
+### Proposed fixes
+- **F13.1 (must-have)** — In the `fetch` wrapper, **never read** the response body. Capture only `url`, `method`, `status`, `headers`, `bodySize` (from `Content-Length`). Body-capture is too dangerous on a `<all_urls>` content script — make it opt-in per host or strip it entirely.
+- **F13.2 (must-have)** — In the `XHR` wrapper, listen to `loadend` but never touch `responseText` or `response`. Same rule.
+- **F13.3** — Wrap the entire `page-hook.ts` install in a **kill-switch check**: if `document.contentType` is video/audio/binary, OR if the URL hostname matches a small denylist (`youtube.com`, `googlevideo.com`, `vimeo.com`, etc.), bail out before patching anything. Strict CSP / streaming sites should be no-ops by default.
+- **F13.4** — Move from `world: 'MAIN'` patching to `chrome.webRequest` (background-only) for network capture. The MV3 `webRequest` API gives us URL, method, status, headers, and timing without ever entering the page's JS realm. We lose body inspection but gain bulletproof compatibility. **This is the right architectural fix** — Loom, Sentry, Datadog all use it for the same reason.
+- **F13.5** — Add a per-site toggle in the popup: "VeloCap is active on this tab — Pause for this site." Lets users self-rescue when something breaks.
+
+### Risk if we delay
+This is **silent**. Users who installed for bug-capture might find their YouTube broken and uninstall without ever connecting the two — pure churn. High priority to fix.
+
+### How to verify
+- After fix: with extension installed (idle), play a YouTube video. Should work identically to no-extension.
+- Repro test: open a fresh YouTube tab → chrome.runtime devtools → confirm content script ran but didn't patch fetch.
+- Regression test: still record on a non-YouTube site and confirm console + network events come through.
+
+### Severity
+**High** — extension can silently break common sites without the user knowing why. Counts as a trust-and-safety issue, not just a bug.
+
+### Decision needed
+- Quick path (F13.1 + F13.2 — strip body capture): keeps current architecture, ~1 hour, fixes YouTube immediately. Loses request/response body capture entirely (you'd see URL/method/status only).
+- Right path (F13.4 — move to `chrome.webRequest`): ~half a day, no body, but bulletproof.
+- We can ship F13.1+F13.2 today and queue F13.4 for next iteration. Or jump straight to F13.4.
+
+---
+
 ## Suggested execution order
 
 If we just pick the highest-impact items per area:

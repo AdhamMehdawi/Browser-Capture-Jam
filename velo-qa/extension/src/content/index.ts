@@ -9,7 +9,10 @@ import { MSG } from '../types.js';
 const HOOK_TAG = 'velocap/hook';
 const CONSOLE_MAX = 500;
 const NETWORK_MAX = 300;
-const ACTIONS_MAX = 500;
+// Issue 12: with mousemove sampled at ~30 Hz, a 1-minute recording adds
+// ~1800 entries. Raise the cap so legitimate clicks/keys/scrolls don't
+// get evicted by mouse motion in normal recordings.
+const ACTIONS_MAX = 5000;
 
 const consoleBuffer: ConsoleEntry[] = [];
 const networkPending = new Map<string, Partial<NetworkEntry>>();
@@ -57,7 +60,17 @@ window.addEventListener('message', (event) => {
       if (last && last.type === 'navigation' && last.url === a.url) return;
     }
     actionsBuffer.push(a);
-    if (actionsBuffer.length > ACTIONS_MAX) actionsBuffer.shift();
+    if (actionsBuffer.length > ACTIONS_MAX) {
+      // Issue 2: when the buffer is full, prefer dropping an old mousemove
+      // (high-volume, low signal) over losing clicks/keys/navigations
+      // (rare, high signal).
+      const idx = actionsBuffer.findIndex((e) => e.type === 'mousemove');
+      if (idx !== -1) {
+        actionsBuffer.splice(idx, 1);
+      } else {
+        actionsBuffer.shift();
+      }
+    }
   }
 });
 

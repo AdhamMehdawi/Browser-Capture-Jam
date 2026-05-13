@@ -212,17 +212,30 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
   }
 });
 
-// When a tab that previously had the overlay navigates to a new page, the
-// content script is reset and our overlay DOM is gone. Re-inject so the
-// user keeps seeing the timer after the new page loads.
+// When a tab that previously had the overlay navigates/reloads to a new page,
+// the content script is reset and our overlay DOM is gone. Re-inject so the
+// user keeps seeing the timer + Stop button after the new page loads.
+//
+// Fix: previously only re-injected if `overlayTabIds.has(tabId)`. But the
+// recording's *primary* tab might have been removed from that set (e.g. if
+// the user navigated away to another tab first, then came back and refreshed).
+// Always re-inject on the primary recording tab. Also retries once after a
+// short delay to cover the race where Chrome fires `status: 'complete'`
+// before the new content script's onMessage listener is registered.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (
-    state.kind === 'recording' &&
-    changeInfo.status === 'complete' &&
-    overlayTabIds.has(tabId)
-  ) {
-    void showOverlayOn(tabId, state.startedAt);
-  }
+  if (state.kind !== 'recording' || changeInfo.status !== 'complete') return;
+  const isOverlayTab = overlayTabIds.has(tabId);
+  const isPrimaryRecordingTab = state.tabId === tabId;
+  if (!isOverlayTab && !isPrimaryRecordingTab) return;
+  // First attempt — most cases hit on first try.
+  void showOverlayOn(tabId, state.startedAt);
+  // Retry after a short delay to cover the timing race with the freshly-
+  // loaded content script registering its message listener.
+  setTimeout(() => {
+    if (state.kind === 'recording' && (state.tabId === tabId || overlayTabIds.has(tabId))) {
+      void showOverlayOn(tabId, state.startedAt);
+    }
+  }, 500);
 });
 
 // Drop tabs from our set when they close so the next stop doesn't try to
@@ -517,9 +530,19 @@ async function handleRecordStart(req: RecordStartReq): Promise<BgResponse> {
     if (blocked) return blocked;
     console.log('[velocap/bg] target tab', { id: tab.id, url: tab.url });
 
-    // Initialize streaming upload session — get SAS URL before recording starts
-    console.log('[velocap/bg] initializing upload session');
-    const upload = await api.initUpload('webm');
+    // Initialize streaming upload session — get SAS URL before recording starts.
+    // MediaRecorder isn't available in MV3 service workers, so we ask the
+    // offscreen doc (which has the API) to probe for the best supported mime.
+    // Prefer MP4 over WebM when this Chrome supports MP4 in MediaRecorder
+    // (Chrome 130+); MP4 plays in Safari, WebM doesn't.
+    await ensureOffscreen();
+    const pickResp = (await chrome.runtime.sendMessage({
+      target: 'offscreen',
+      kind: 'pickMime',
+    })) as { mimeType: string; ext: string } | undefined;
+    const ext = pickResp?.ext === 'mp4' ? 'mp4' : 'webm';
+    console.log('[velocap/bg] initializing upload session, ext:', ext, 'mime:', pickResp?.mimeType);
+    const upload = await api.initUpload(ext);
     console.log('[velocap/bg] upload session ready', { objectPath: upload.objectPath });
 
     let startPayload: Record<string, unknown>;
@@ -846,12 +869,16 @@ async function onUploadCompleteFromOffscreen(msg: {
     // Video plays from readSasUrl — no binary data in this message.
     if (tabId != null) {
       try {
+        // mimeType reflects whichever container we recorded (mp4 or webm).
+        const previewMime = objectPath?.toLowerCase().endsWith('.mp4')
+          ? 'video/mp4'
+          : 'video/webm';
         await chrome.tabs.sendMessage(tabId, {
           kind: 'preview:show',
           readSasUrl,
           durationMs: msg.durationMs,
           bytes: msg.bytes,
-          mimeType: 'video/webm',
+          mimeType: previewMime,
           mediaType: 'video',
           note: msg.note,
         });
@@ -1047,12 +1074,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // later in the dashboard).
     const pageTitle = state.capturedContext?.page?.title ?? '';
     const pageUrl = state.capturedContext?.page?.url ?? '';
+    // Derive mimeType from the actual object path extension so MP4 captures
+    // are reported correctly (Safari needs to know).
+    const videoMime = state.objectPath?.toLowerCase().endsWith('.mp4')
+      ? 'video/mp4'
+      : 'video/webm';
     sendResponse({
       readSasUrl: state.readSasUrl,
       screenshotDataUrl: state.screenshotDataUrl,
       durationMs: state.durationMs,
       bytes: state.bytes,
-      mimeType: state.mediaType === 'screenshot' ? 'image/png' : 'video/webm',
+      mimeType: state.mediaType === 'screenshot' ? 'image/png' : videoMime,
       mediaType: state.mediaType,
       pageTitle,
       pageUrl,
@@ -1071,7 +1103,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chrome.downloads.download(
       {
         url: state.readSasUrl,
-        filename: `velocap-${Date.now()}.${state.mediaType === 'screenshot' ? 'png' : 'webm'}`,
+        filename: `velocap-${Date.now()}.${
+          state.mediaType === 'screenshot'
+            ? 'png'
+            : state.objectPath?.toLowerCase().endsWith('.mp4')
+              ? 'mp4'
+              : 'webm'
+        }`,
         saveAs: true,
       },
       (downloadId) => {

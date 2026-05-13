@@ -36,10 +36,26 @@ export interface DeviceInfo {
 }
 
 export interface ActionEntry {
-  type: 'click' | 'input' | 'select' | 'submit' | 'navigation';
-  selector: string;
+  // Issue 12: added mouse / wheel / key / focus / visibility events. All
+  // fields beyond `type` and `timestamp` are optional so each event kind
+  // populates only what's relevant.
+  type:
+    | 'click'
+    | 'input'
+    | 'select'
+    | 'submit'
+    | 'navigation'
+    | 'mousemove'
+    | 'mousedown'
+    | 'mouseup'
+    | 'wheel'
+    | 'keydown'
+    | 'focus'
+    | 'blur'
+    | 'visibility';
+  selector?: string;
   selectorAlts?: string[];
-  target: {
+  target?: {
     tag: string;
     text?: string;
     role?: string;
@@ -49,6 +65,22 @@ export interface ActionEntry {
   value?: string;
   url?: string;
   timestamp: number;
+  // Mouse / pointer.
+  x?: number;
+  y?: number;
+  button?: number;
+  // Wheel.
+  deltaX?: number;
+  deltaY?: number;
+  scrollTop?: number;
+  // Keyboard (non-typing keys only).
+  key?: string;
+  ctrl?: boolean;
+  shift?: boolean;
+  alt?: boolean;
+  meta?: boolean;
+  // Visibility / focus.
+  state?: 'visible' | 'hidden' | 'focus' | 'blur';
 }
 
 export interface CapturePayload {

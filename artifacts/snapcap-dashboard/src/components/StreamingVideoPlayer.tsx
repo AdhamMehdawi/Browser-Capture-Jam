@@ -35,13 +35,14 @@ function StreamingVideoPlayerImpl({
   useEffect(() => {
     if (!videoRef.current) return;
     let player: { destroy(): void } | null = null;
+    let cancelled = false;
 
     import("plyr").then((mod) => {
+      if (cancelled || !videoRef.current) return;
       const PlyrClass = (mod.default ?? mod) as unknown as new (
         el: HTMLVideoElement,
         opts: Record<string, unknown>,
       ) => { destroy(): void };
-      if (!videoRef.current) return;
       player = new PlyrClass(videoRef.current, {
         controls: [
           "play-large",
@@ -67,8 +68,15 @@ function StreamingVideoPlayerImpl({
     });
 
     return () => {
+      cancelled = true;
       if (player) {
-        player.destroy();
+        try {
+          player.destroy();
+        } catch (e) {
+          if (import.meta.env.DEV) {
+            console.debug("[velocap] plyr destroy threw (safe):", e);
+          }
+        }
         plyrRef.current = null;
       }
     };
@@ -183,8 +191,65 @@ function StreamingVideoPlayerImpl({
 // when the parent re-renders for unrelated state changes (search input, tab
 // switch, share modal open/close). Plyr re-init was the "frozen frame /
 // video doesn't play" symptom.
+// Stricter compatibility probe.
+//
+// `canPlayType('video/webm')` returns "maybe" in Safari 14.1+ even though
+// Safari's WebM decoder rejects VP9-encoded WebM (which is what we record).
+// We hit a Safari React-DOM commit crash ("NotFoundError") any time a
+// <video> with our SAS-signed .webm URL mounts.
+//
+// Detection strategy: probe for VP9 specifically, AND treat Safari as
+// unsupported by default. Bypass via window flag for local debugging.
+function detectWebmSupport(): boolean {
+  try {
+    if (typeof document === "undefined") return true;
+    const v = document.createElement("video");
+    // Empty string = definitely no; "maybe"/"probably" = some level of support.
+    const vp9 = v.canPlayType('video/webm; codecs="vp9"');
+    const generic = v.canPlayType("video/webm");
+    const ua = (typeof navigator !== "undefined" ? navigator.userAgent : "") || "";
+    const isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(ua);
+    if (isSafari) return false; // Safari unreliably plays our WebM/VP9
+    return vp9 !== "" || generic !== "";
+  } catch {
+    return true;
+  }
+}
+const SUPPORTS_WEBM = detectWebmSupport();
+
+function StreamingVideoPlayerWithCompatCheck(props: StreamingVideoPlayerProps) {
+  // Fix: don't mount <video> in browsers that can't decode the format.
+  // Otherwise React's commit-phase ref attachment on the error-state
+  // <video> throws "NotFoundError" and blanks the page.
+  const isWebm =
+    !!props.videoUrl &&
+    /\.webm(\?|$)/i.test(props.videoUrl);
+  if (isWebm && !SUPPORTS_WEBM) {
+    return (
+      <div className="relative w-full aspect-video bg-black/90 rounded-lg flex items-center justify-center text-center p-6">
+        <div className="text-sm text-white/80 max-w-md leading-relaxed">
+          <p className="font-semibold mb-2">Video playback not supported in this browser</p>
+          <p className="text-white/60">
+            VeloCap recordings use the WebM format. Safari doesn't play WebM yet — open this link in Chrome, Edge, or Firefox to watch the recording.
+          </p>
+          {props.videoUrl && (
+            <a
+              href={props.videoUrl}
+              download
+              className="inline-block mt-4 text-blue-400 hover:underline text-xs"
+            >
+              Download the video file
+            </a>
+          )}
+        </div>
+      </div>
+    );
+  }
+  return <StreamingVideoPlayerImpl {...props} />;
+}
+
 export const StreamingVideoPlayer = memo(
-  StreamingVideoPlayerImpl,
+  StreamingVideoPlayerWithCompatCheck,
   (prev, next) =>
     prev.videoUrl === next.videoUrl &&
     prev.knownDurationMs === next.knownDurationMs &&

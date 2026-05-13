@@ -79,6 +79,9 @@ router.post("/uploads/complete", async (req: any, res) => {
 
     if (Array.isArray(body.actions)) {
       for (const action of body.actions) {
+        // Issue 12: include the new fields added for mouse / wheel / key /
+        // focus / visibility events. Use conditional spread so missing
+        // fields don't show up as explicit `null`s in the JSONB blob.
         events.push({
           id: randomUUID(),
           type: action.type,
@@ -92,6 +95,18 @@ router.post("/uploads/complete", async (req: any, res) => {
           targetRole: action.target?.role,
           inputType: action.target?.inputType,
           targetName: action.target?.name,
+          ...(action.x != null ? { x: action.x } : {}),
+          ...(action.y != null ? { y: action.y } : {}),
+          ...(action.button != null ? { button: action.button } : {}),
+          ...(action.deltaX != null ? { deltaX: action.deltaX } : {}),
+          ...(action.deltaY != null ? { deltaY: action.deltaY } : {}),
+          ...(action.scrollTop != null ? { scrollTop: action.scrollTop } : {}),
+          ...(action.key != null ? { key: action.key } : {}),
+          ...(action.ctrl != null ? { ctrl: action.ctrl } : {}),
+          ...(action.shift != null ? { shift: action.shift } : {}),
+          ...(action.alt != null ? { alt: action.alt } : {}),
+          ...(action.meta != null ? { meta: action.meta } : {}),
+          ...(action.state != null ? { state: action.state } : {}),
         });
       }
     }

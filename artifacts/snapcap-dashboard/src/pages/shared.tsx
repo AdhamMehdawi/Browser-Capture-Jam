@@ -1,7 +1,54 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, Component } from "react";
+import type { ErrorInfo, ReactNode } from "react";
 import { useParams, Link } from "wouter";
 import { format } from "date-fns";
 import { StreamingVideoPlayer } from "@/components/StreamingVideoPlayer";
+import { MouseHeatmap } from "@/components/MouseHeatmap";
+
+// ============================================================
+// SafariCommitErrorBoundary — last-resort safety net for the
+// Safari/WebM commit-phase NotFoundError. The real fix lives in
+// StreamingVideoPlayer (skip mounting <video> when the browser
+// can't play WebM). This boundary catches any *other* commit
+// errors and shows a static fallback so the page is never blank.
+// ============================================================
+class SafariCommitErrorBoundary extends Component<
+  { children: ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+  static getDerivedStateFromError(err: unknown): { hasError: boolean } {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("The object can not be found here")) {
+      return { hasError: true };
+    }
+    throw err;
+  }
+  componentDidCatch(err: Error, info: ErrorInfo): void {
+    console.warn("[velocap/shared] swallowed React commit error:", err.message, info.componentStack);
+  }
+  render(): ReactNode {
+    if (this.state.hasError) {
+      return (
+        <div className="h-screen flex items-center justify-center bg-background text-center p-6">
+          <div className="max-w-md">
+            <h1 className="text-xl font-semibold mb-2">Couldn't render this recording</h1>
+            <p className="text-sm text-muted-foreground">
+              This browser hit a rendering issue. Try opening the link in Chrome or Firefox, or reload the page.
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-4 text-sm text-primary hover:underline"
+            >
+              Reload
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 import {
   Globe, Terminal, MousePointerClick, Activity,
   Search, Info, Clock, AlertCircle, AlertTriangle,
@@ -148,10 +195,17 @@ export default function SharedRecordingViewer() {
 
   const filteredEvents = useMemo(() => {
     if (!recording?.events) return [];
-    const ACTION_TYPES = new Set(['click', 'input', 'select', 'submit', 'navigation']);
+    // Issue 12 (paused): mouse / wheel / key / focus / blur / visibility are
+    // captured and stored but hidden from the UI for now. Restore them in
+    // the Actions allowlist + render cases when we revisit the mouse view.
+    const ACTION_TYPES = new Set([
+      'click', 'input', 'select', 'submit', 'navigation',
+    ]);
     return recording.events.filter(event => {
       if (activeTab === 'actions') {
         if (!ACTION_TYPES.has(event.type)) return false;
+      } else if (activeTab === 'mouse') {
+        if (event.type !== 'mousemove') return false;
       } else if (activeTab === 'info') return false;
       else if (event.type !== activeTab) return false;
 
@@ -219,6 +273,7 @@ export default function SharedRecordingViewer() {
   const screenshotUrl = isScreenshot ? ((recording as any).videoUrl ?? proxyUrl) : null;
 
   return (
+    <SafariCommitErrorBoundary>
     <div className="flex flex-col h-screen bg-background overflow-hidden">
       {/* Header */}
       <header className="px-6 py-4 border-b border-border flex items-center justify-between shrink-0 bg-card">
@@ -291,6 +346,10 @@ export default function SharedRecordingViewer() {
                   { value: 'console', label: 'Console', icon: <Terminal size={14} /> },
                   { value: 'request', label: 'Network', icon: <Globe size={14} /> },
                   { value: 'actions', label: 'Actions', icon: <MousePointerClick size={14} /> },
+                  // Issue 12 (paused): Mouse tab hidden for now. Capture
+                  // pipeline + MouseHeatmap component remain wired so we can
+                  // re-enable by uncommenting this entry.
+                  // { value: 'mouse', label: 'Mouse', icon: <MousePointer size={14} /> },
                 ].map(tab => (
                   <TabsTrigger
                     key={tab.value}
@@ -400,8 +459,24 @@ export default function SharedRecordingViewer() {
               </ScrollArea>
             )}
 
+            {/* Issue 12: Mouse tab — heatmap of mouse motion overlaid on the
+                recording's thumbnail. Identical to the authenticated recording
+                page so both surfaces show the same view. */}
+            {activeTab === 'mouse' && (
+              <ScrollArea className="flex-1">
+                <div className="p-4">
+                  <MouseHeatmap
+                    events={recording.events ?? []}
+                    pageUrl={recording.pageUrl ?? null}
+                    thumbnailUrl={(recording as any).thumbnailUrl ?? null}
+                    viewport={(recording as any).browserInfo?.viewport ?? null}
+                  />
+                </div>
+              </ScrollArea>
+            )}
+
             {/* Log Tabs */}
-            {activeTab !== 'info' && (
+            {activeTab !== 'info' && activeTab !== 'mouse' && (
               <>
                 <div className="p-2 border-b border-border shrink-0">
                   <div className="relative">
@@ -762,5 +837,6 @@ export default function SharedRecordingViewer() {
           ) : null}
         </div>
     </div>
+    </SafariCommitErrorBoundary>
   );
 }

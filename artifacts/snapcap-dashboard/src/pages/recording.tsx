@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { Scissors, RotateCcw } from "lucide-react";
 import { StreamingVideoPlayer } from "@/components/StreamingVideoPlayer";
+import { MouseHeatmap } from "@/components/MouseHeatmap";
 import {
   ArrowLeft, Share2, Globe, Terminal, MousePointerClick, Activity,
   Search, Info, Clock, AlertCircle, Play, Pause, AlertTriangle,
@@ -229,6 +230,9 @@ function PayloadBlock({ label, body }: { label: string; body: string }) {
   );
 }
 
+// MouseHeatmap moved to @/components/MouseHeatmap so the share page can
+// reuse the same component without duplicating ~340 lines of canvas code.
+
 export default function RecordingViewer() {
   const params = useParams();
   const id = params.id as string;
@@ -238,9 +242,6 @@ export default function RecordingViewer() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
 
-  // Auto-open the detail drawer whenever an event is selected. Closing it
-  // clears the selection too so the drawer is easy to reopen via clicking
-  // another event.
   useEffect(() => {
     if (selectedLog) setDetailOpen(true);
   }, [selectedLog]);
@@ -351,15 +352,22 @@ export default function RecordingViewer() {
 
   const filteredEvents = useMemo(() => {
     if (!recording?.events) return [];
-    
-    const ACTION_TYPES = new Set(['click', 'input', 'select', 'submit', 'navigation']);
+
+    // Issue 12 (paused): mouse / wheel / key / focus / blur / visibility are
+    // captured and stored but hidden from the UI for now. Restore them in
+    // the allowlist when we revisit the mouse view.
+    const ACTION_TYPES = new Set([
+      'click', 'input', 'select', 'submit', 'navigation',
+    ]);
     return recording.events.filter(event => {
       // Tab filter
       if (activeTab === 'actions') {
         if (!ACTION_TYPES.has(event.type)) return false;
+      } else if (activeTab === 'mouse') {
+        if (event.type !== 'mousemove') return false;
       } else if (activeTab === 'info') return false;
       else if (event.type !== activeTab) return false;
-      
+
       // Search filter
       if (search) {
         const query = search.toLowerCase();
@@ -368,7 +376,7 @@ export default function RecordingViewer() {
         const matchesStatus = event.status?.toString().includes(query);
         return matchesUrl || matchesMsg || matchesStatus;
       }
-      
+
       return true;
     }).sort((a, b) => a.timestamp - b.timestamp);
   }, [recording?.events, activeTab, search]);
@@ -617,6 +625,10 @@ export default function RecordingViewer() {
                   { value: 'console', label: 'Console', icon: <Terminal size={14} /> },
                   { value: 'request', label: 'Network', icon: <Globe size={14} /> },
                   { value: 'actions', label: 'Actions', icon: <MousePointerClick size={14} /> },
+                  // Issue 12 (paused): Mouse tab hidden for now. Capture
+                  // pipeline + MouseHeatmap component remain wired so we can
+                  // re-enable by uncommenting this entry.
+                  // { value: 'mouse', label: 'Mouse', icon: <MousePointer size={14} /> },
                 ].map(tab => (
                   <TabsTrigger
                     key={tab.value}
@@ -733,8 +745,23 @@ export default function RecordingViewer() {
               </ScrollArea>
             )}
 
+            {/* Issue 12: Mouse tab — heatmap of mouse motion overlaid on
+                the recording's thumbnail so dots have visual context. */}
+            {activeTab === 'mouse' && (
+              <ScrollArea className="flex-1">
+                <div className="p-4">
+                  <MouseHeatmap
+                    events={recording.events ?? []}
+                    pageUrl={recording.pageUrl ?? null}
+                    thumbnailUrl={(recording as any).thumbnailUrl ?? null}
+                    viewport={(recording as any).browserInfo?.viewport ?? null}
+                  />
+                </div>
+              </ScrollArea>
+            )}
+
             {/* Log Tabs (Console, Network, Actions) */}
-            {activeTab !== 'info' && (
+            {activeTab !== 'info' && activeTab !== 'mouse' && (
               <>
                 {/* Search bar */}
                 <div className="p-2 border-b border-border shrink-0">

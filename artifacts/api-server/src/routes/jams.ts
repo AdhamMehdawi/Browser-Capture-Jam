@@ -69,12 +69,13 @@ router.post("/jams", requireAuth, async (req: any, res) => {
       }
     }
 
-    // Transform user actions (clicks, inputs, selects, submits, navigations)
+    // Transform user actions (clicks, inputs, selects, submits, navigations,
+    // and Issue 12's new event types: mouse / wheel / key / focus / visibility).
     if (Array.isArray(body.actions)) {
       for (const action of body.actions) {
         events.push({
           id: randomUUID(),
-          type: action.type, // click, input, select, submit, navigation
+          type: action.type,
           timestamp: action.timestamp || Date.now(),
           selector: action.selector || "",
           selectorAlts: action.selectorAlts || [],
@@ -86,6 +87,20 @@ router.post("/jams", requireAuth, async (req: any, res) => {
           targetRole: action.target?.role,
           inputType: action.target?.inputType,
           targetName: action.target?.name,
+          // Issue 12: forward the new fields. Conditional spread keeps them
+          // out of the JSONB blob when missing (instead of explicit nulls).
+          ...(action.x != null ? { x: action.x } : {}),
+          ...(action.y != null ? { y: action.y } : {}),
+          ...(action.button != null ? { button: action.button } : {}),
+          ...(action.deltaX != null ? { deltaX: action.deltaX } : {}),
+          ...(action.deltaY != null ? { deltaY: action.deltaY } : {}),
+          ...(action.scrollTop != null ? { scrollTop: action.scrollTop } : {}),
+          ...(action.key != null ? { key: action.key } : {}),
+          ...(action.ctrl != null ? { ctrl: action.ctrl } : {}),
+          ...(action.shift != null ? { shift: action.shift } : {}),
+          ...(action.alt != null ? { alt: action.alt } : {}),
+          ...(action.meta != null ? { meta: action.meta } : {}),
+          ...(action.state != null ? { state: action.state } : {}),
         });
       }
     }

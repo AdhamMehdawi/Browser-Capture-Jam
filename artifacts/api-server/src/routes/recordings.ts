@@ -258,19 +258,39 @@ router.delete("/recordings/:id", async (req: any, res) => {
 
 router.post("/recordings/:id/share", async (req: any, res) => {
   try {
-    const shareToken = crypto.randomBytes(16).toString("hex");
-    const [recording] = await db
-      .update(recordingsTable)
-      .set({ shareToken, updatedAt: new Date() })
+    // Fix Issue 3: make this endpoint idempotent. Previously every call
+    // generated a fresh random token and overwrote any existing one — which
+    // silently invalidated any link the user had already copied/sent. Now
+    // we look up the recording first and reuse its existing token when one
+    // is already present. Caller can DELETE the token explicitly to rotate.
+    const existing = await db
+      .select({ shareToken: recordingsTable.shareToken })
+      .from(recordingsTable)
       .where(
         and(
           eq(recordingsTable.id, req.params.id),
           eq(recordingsTable.userId, req.userId),
         ),
       )
-      .returning();
+      .limit(1);
 
-    if (!recording) return res.status(404).json({ error: "Not found" });
+    if (existing.length === 0) {
+      return res.status(404).json({ error: "Not found" });
+    }
+
+    let shareToken = existing[0].shareToken;
+    if (!shareToken) {
+      shareToken = crypto.randomBytes(16).toString("hex");
+      await db
+        .update(recordingsTable)
+        .set({ shareToken, updatedAt: new Date() })
+        .where(
+          and(
+            eq(recordingsTable.id, req.params.id),
+            eq(recordingsTable.userId, req.userId),
+          ),
+        );
+    }
 
     const host =
       req.headers["x-forwarded-host"] || req.headers.host || "localhost";

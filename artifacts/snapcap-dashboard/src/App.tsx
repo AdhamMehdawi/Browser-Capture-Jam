@@ -15,7 +15,21 @@ import Settings from "@/pages/settings";
 import ExtensionAuth from "@/pages/extension-auth";
 import Layout from "@/components/layout";
 
-const queryClient = new QueryClient();
+// Fix Issues 4 + 6: previously every navigation / window focus triggered a
+// fresh API fetch — and on the recording detail page that re-rendered the
+// video player, destroying and recreating Plyr (visible as a freeze /
+// blank frame mid-playback). 30 s stale window covers normal nav patterns;
+// the existing Clerk invalidator below still wipes the cache on sign-out.
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      gcTime: 5 * 60_000,
+      refetchOnWindowFocus: false,
+      retry: 1,
+    },
+  },
+});
 
 const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY || "mock";
 const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL;

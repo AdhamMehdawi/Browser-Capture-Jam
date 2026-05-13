@@ -88,6 +88,33 @@ export function App() {
     })();
   }, []);
 
+  // Fix Issue 1: react to auth landing in storage after the dashboard flow
+  // completes. The popup was reading auth once on mount; the background's
+  // verifyClerkToken can finish after the popup re-opens, leaving the user
+  // on the auth screen. This listener picks up the write the moment it lands.
+  useEffect(() => {
+    const onChanged = (
+      changes: { [key: string]: chrome.storage.StorageChange },
+      areaName: string,
+    ) => {
+      if (areaName !== 'local') return;
+      const change = changes['velocap.auth'];
+      if (!change) return;
+      const next = change.newValue as AuthState | undefined;
+      if (next && next.accessToken && next.user) {
+        setAuthState(next);
+        setError(null);
+        setView('ready');
+      } else if (!next) {
+        // Auth cleared elsewhere (sign-out from another surface).
+        setAuthState(null);
+        setView('auth');
+      }
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => chrome.storage.onChanged.removeListener(onChanged);
+  }, []);
+
   if (view === 'loading') {
     return (
       <div className="app">

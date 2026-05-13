@@ -191,7 +191,27 @@ function showOverlay(startedAt: number): void {
     if (!overlayStopBtn) return;
     overlayStopBtn.disabled = true;
     overlayStopBtn.textContent = 'Stopping…';
-    void chrome.runtime.sendMessage({ kind: 'bg:record-stop' });
+    // Fix Issue 7 (round 2): previously this was fire-and-forget, so when bg
+    // hung the overlay stayed on "Stopping…" forever with no user feedback.
+    // Now we await the response and self-clean after a hard local timeout.
+    const localTimeoutMs = 35_000; // > bg watchdog so bg has priority
+    const localTimer = window.setTimeout(() => {
+      console.warn('[velocap/overlay] local stop timeout — hiding overlay');
+      hideOverlay();
+    }, localTimeoutMs);
+    chrome.runtime
+      .sendMessage({ kind: 'bg:record-stop' })
+      .then(() => {
+        window.clearTimeout(localTimer);
+        // bg will broadcast 'overlay:hide' on success, but if it didn't
+        // (e.g. bg sent watchdog error), hide locally as a safety net.
+        if (overlayStopBtn) hideOverlay();
+      })
+      .catch((e) => {
+        window.clearTimeout(localTimer);
+        console.warn('[velocap/overlay] stop sendMessage failed:', e);
+        hideOverlay();
+      });
   });
 
   const tick = () => {

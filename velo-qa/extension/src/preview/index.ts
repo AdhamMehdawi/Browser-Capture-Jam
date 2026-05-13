@@ -16,6 +16,16 @@ interface PreviewState {
   durationMs: number;
   bytes: number;
   note?: string;
+  /** Fix Issue 10: page title captured during recording, used to pre-fill the Title input. */
+  pageTitle?: string;
+  pageUrl?: string;
+}
+
+/** Issue 10: hard cap so very long page titles don't visually break the input. */
+function defaultTitleFor(state: PreviewState): string {
+  const raw = (state.pageTitle ?? '').trim();
+  if (!raw) return '';
+  return raw.length > 80 ? `${raw.slice(0, 77)}…` : raw;
 }
 
 const main = document.getElementById('main') as HTMLElement;
@@ -81,6 +91,12 @@ function render(state: PreviewState): void {
   let trimEndMs = durationMs;
 
   main.innerHTML = `
+    <!-- Issue 9 (round 2): hint moved ABOVE the video so the sticky card at
+         the bottom never overlaps it. Position-1 in the scroll content. -->
+    <div class="trim-hint" id="trim-hint" hidden>
+      <span>💡 Drag the blue handles on the progress bar below to trim the start or end of the video.</span>
+      <button id="trim-hint-close" aria-label="Dismiss hint">×</button>
+    </div>
     <div class="player-wrap" id="player-wrap">
       <video id="video" controls autoplay playsinline></video>
     </div>
@@ -117,7 +133,33 @@ function render(state: PreviewState): void {
         padding: 2px 10px; border-radius: 20px;
       }
       .trim-badge.active { color: var(--accent); border-color: var(--accent); background: rgba(124,58,237,0.08); }
+      /* Issue 9: trim hint banner. */
+      .trim-hint {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 12px;
+        margin: 0 0 8px;
+        padding: 8px 12px;
+        background: rgba(124,58,237,0.06);
+        border: 1px solid rgba(124,58,237,0.18);
+        border-radius: 8px;
+        font-size: 12px; color: var(--fg);
+      }
+      .trim-hint button {
+        background: transparent; border: none; cursor: pointer;
+        font-size: 18px; line-height: 1; color: var(--muted);
+        padding: 0 4px; min-width: 24px; height: 24px;
+      }
+      .trim-hint button:hover { color: var(--fg); }
 
+      /* Fix: keep Plyr controls always visible in the preview modal.
+         Plyr fades them on mouse-idle with a .plyr--hide-controls class;
+         we force opacity back so the scrubber + trim handles stay reachable. */
+      .plyr--hide-controls .plyr__controls,
+      .plyr__controls {
+        opacity: 1 !important;
+        transform: translateY(0) !important;
+        pointer-events: auto !important;
+      }
       /* Trim overlay on the Plyr progress bar */
       .plyr__progress { position: relative !important; }
       .trim-overlay {
@@ -165,6 +207,26 @@ function render(state: PreviewState): void {
   enableScrubbingFor(video);
   const trimBadge = document.getElementById('trim-badge') as HTMLElement;
 
+  // Issue 9: show the trim hint unless the user has dismissed it before.
+  const trimHint = document.getElementById('trim-hint') as HTMLElement | null;
+  const trimHintClose = document.getElementById('trim-hint-close') as HTMLButtonElement | null;
+  const HINT_KEY = 'velocap.trimHintDismissed';
+  try {
+    if (trimHint && localStorage.getItem(HINT_KEY) !== '1') {
+      trimHint.hidden = false;
+    }
+  } catch {
+    // localStorage may be unavailable (rare); silently leave hidden.
+  }
+  trimHintClose?.addEventListener('click', () => {
+    if (trimHint) trimHint.hidden = true;
+    try {
+      localStorage.setItem(HINT_KEY, '1');
+    } catch {
+      // ignore
+    }
+  });
+
   // Initialize Plyr, then inject trim handles into the progress bar
   void (async () => {
     try {
@@ -178,6 +240,10 @@ function render(state: PreviewState): void {
       new Plyr(video, {
         controls: ['play', 'progress', 'current-time', 'mute', 'volume', 'fullscreen'],
         duration: knownSec,
+        // Fix: keep controls visible. Default Plyr fades them after a few
+        // seconds of mouse idle; in the preview modal users want the
+        // scrubber + trim handles always reachable.
+        hideControls: false,
       });
 
       // Wait for Plyr to render, then inject trim handles into the progress bar
@@ -319,6 +385,11 @@ function render(state: PreviewState): void {
   };
 
   const titleInput = document.getElementById('title') as HTMLInputElement;
+  // Fix Issue 10: pre-fill the title from the captured page title. Skip if
+  // the user has already typed something (e.g. re-render after upload).
+  if (!titleInput.value) {
+    titleInput.value = defaultTitleFor(state);
+  }
   let discardBtn = document.getElementById('discard') as HTMLButtonElement;
   let downloadBtn = document.getElementById('download') as HTMLButtonElement;
   let uploadBtn = document.getElementById('upload') as HTMLButtonElement;
@@ -819,6 +890,10 @@ async function renderScreenshot(state: PreviewState): Promise<void> {
     statusEl.className = 'status' + (cls ? ' ' + cls : '');
   };
   const titleInput = document.getElementById('title') as HTMLInputElement;
+  // Fix Issue 10: pre-fill title from the captured page title (screenshot path).
+  if (!titleInput.value) {
+    titleInput.value = defaultTitleFor(state);
+  }
   let discardBtn = document.getElementById('discard') as HTMLButtonElement;
   const downloadBtn = document.getElementById('download') as HTMLButtonElement;
   let uploadBtn = document.getElementById('upload') as HTMLButtonElement;

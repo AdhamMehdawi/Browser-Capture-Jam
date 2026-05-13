@@ -301,13 +301,19 @@ interface Session {
 let session: Session | null = null;
 
 function pickMime(): string {
-  // Use the simplest supported format for maximum compatibility.
-  // Avoid complex codec strings that can cause demuxer issues.
-  if (MediaRecorder.isTypeSupported('video/webm')) {
-    return 'video/webm';
-  }
-  if (MediaRecorder.isTypeSupported('video/mp4')) {
-    return 'video/mp4';
+  // Fix Issue 11: prefer VP9 over VP8 — same bitrate, ~30 % sharper image.
+  // Chrome resolves bare `video/webm` to VP8, so we have to be explicit.
+  // Fall back through the chain on the rare browser that lacks VP9.
+  const candidates = [
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp9',
+    'video/webm;codecs=vp8,opus',
+    'video/webm;codecs=vp8',
+    'video/webm',
+    'video/mp4',
+  ];
+  for (const c of candidates) {
+    if (MediaRecorder.isTypeSupported(c)) return c;
   }
   return '';
 }
@@ -453,14 +459,32 @@ async function start(msg: StartMsg): Promise<void> {
   ]);
 
   const mimeType = pickMime();
-  console.log('[velocap/offscreen] using mimeType:', mimeType);
-  console.log('[velocap/offscreen] video tracks:', combined.getVideoTracks().length);
-  console.log('[velocap/offscreen] audio tracks:', combined.getAudioTracks().length);
+  // Fix Issue 11: 2 Mbps was way too low — at 1080p it produced blocky / blurry
+  // playback. Bump defaults to industry-typical ranges (Loom ~4–6 Mbps for
+  // tab, YouTube minimum 8 Mbps for 1080p30). Use higher for full-display
+  // captures since the source resolution is usually larger.
+  const videoBitsPerSecond = msg.source === 'display' ? 8_000_000 : 5_000_000;
+  // Audio bitrate stays — 128 kbps is already fine for speech.
+  const audioBitsPerSecond = 128_000;
+
+  // Log the chosen settings so support cases can confirm what was actually
+  // negotiated (codec / bitrate / source resolution).
+  const videoTrack = combined.getVideoTracks()[0];
+  const videoSettings = videoTrack?.getSettings?.() ?? {};
+  console.log('[velocap/offscreen] encoder config', {
+    mimeType,
+    source: msg.source,
+    videoBitsPerSecond,
+    audioBitsPerSecond,
+    width: videoSettings.width,
+    height: videoSettings.height,
+    frameRate: videoSettings.frameRate,
+  });
 
   const recorder = new MediaRecorder(combined, {
     mimeType,
-    videoBitsPerSecond: 2_000_000,
-    audioBitsPerSecond: 128_000,
+    videoBitsPerSecond,
+    audioBitsPerSecond,
   });
   const chunks: Blob[] = [];
 
@@ -559,20 +583,40 @@ async function start(msg: StartMsg): Promise<void> {
 
 function stop(): void {
   console.log('[velocap/offscreen] stop called, session:', !!session);
-  if (!session) return;
-  console.log('[velocap/offscreen] recorder state:', session.recorder.state);
-  if (session.recorder.state !== 'inactive') {
-    // Force the recorder to flush its current buffer before stop so the
-    // final WebM is complete even for very short recordings.
-    try {
-      session.recorder.requestData();
-      console.log('[velocap/offscreen] requestData called');
-    } catch (e) {
-      console.log('[velocap/offscreen] requestData failed:', e);
-    }
-    session.recorder.stop();
-    console.log('[velocap/offscreen] stop called on recorder');
+  // Fix Issue 7: previously this returned silently when there was no session or
+  // when the recorder was already inactive — leaving the background waiting
+  // forever for `upload-complete`. Now we always report back so the popup gets
+  // a clear error instead of a hung Stop button.
+  if (!session) {
+    void chrome.runtime.sendMessage({
+      target: 'bg',
+      kind: 'recorder-error',
+      message: 'No active recording session in offscreen document.',
+    } satisfies ErrorMsg);
+    return;
   }
+  console.log('[velocap/offscreen] recorder state:', session.recorder.state);
+  if (session.recorder.state === 'inactive') {
+    // Recorder already torn down (e.g. Chrome killed it). Tell bg so it
+    // resolves the waiter instead of hanging.
+    session = null;
+    void chrome.runtime.sendMessage({
+      target: 'bg',
+      kind: 'recorder-error',
+      message: 'Recorder was already inactive when Stop was clicked.',
+    } satisfies ErrorMsg);
+    return;
+  }
+  // Force the recorder to flush its current buffer before stop so the
+  // final WebM is complete even for very short recordings.
+  try {
+    session.recorder.requestData();
+    console.log('[velocap/offscreen] requestData called');
+  } catch (e) {
+    console.log('[velocap/offscreen] requestData failed:', e);
+  }
+  session.recorder.stop();
+  console.log('[velocap/offscreen] stop called on recorder');
 }
 
 // Global error handler to catch any unhandled errors

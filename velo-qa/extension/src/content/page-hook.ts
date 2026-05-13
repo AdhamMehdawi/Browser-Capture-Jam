@@ -135,11 +135,24 @@ function targetMeta(el: Element): {
 }
 
 // --- click ---
+// Fix Issue 5: previously read `e.target` only, which on shadow-DOM components
+// (Lit, Stencil, Salesforce LWC, many design systems) is the *shadow host*,
+// not the inner button the user actually clicked — so selectors pointed at a
+// generic wrapper and many real targets looked the same. `composedPath()[0]`
+// returns the deepest element including across open shadow roots.
+function resolveEventTarget(e: Event): Element | null {
+  const path = typeof e.composedPath === 'function' ? e.composedPath() : [];
+  for (const node of path) {
+    if (node instanceof Element) return node;
+  }
+  return e.target instanceof Element ? e.target : null;
+}
+
 document.addEventListener(
   'click',
   (e) => {
-    const el = e.target as Element | null;
-    if (!el || !(el instanceof Element)) return;
+    const el = resolveEventTarget(e);
+    if (!el) return;
     if (isOwnUi(el)) return;
     if ((e as MouseEvent).isTrusted === false) return;
     const { primary, alternates } = buildSelectors(el);

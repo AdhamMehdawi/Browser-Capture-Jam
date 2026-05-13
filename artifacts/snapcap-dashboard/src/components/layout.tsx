@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useUser, useClerk } from "@clerk/react";
-import { Activity, Settings, LogOut, Menu, ChevronDown } from "lucide-react";
+import { Activity, Settings, LogOut, Menu, ChevronDown, Download } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -49,7 +49,19 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             </Link>
           </div>
 
-          {user && (
+          <div className="flex items-center gap-2">
+            <a
+              href="https://chromewebstore.google.com/detail/velocap/kbclmdckneihfonoccdmeommhnkddocf?utm_source=item-share-cb"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-primary/10 text-primary hover:bg-primary/15 transition-colors"
+            >
+              <Download size={14} />
+              <span className="hidden sm:inline">Get Chrome Extension</span>
+              <span className="sm:hidden">Extension</span>
+            </a>
+
+            {user && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent transition-colors outline-none">
@@ -80,7 +92,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-          )}
+            )}
+          </div>
         </header>
 
         {/* Below the top bar: sidebar + content side by side */}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, memo } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import "plyr/dist/plyr.css";
 
@@ -10,7 +10,7 @@ interface StreamingVideoPlayerProps {
   onExpired?: () => void;
 }
 
-export function StreamingVideoPlayer({
+function StreamingVideoPlayerImpl({
   videoUrl,
   knownDurationMs,
   trimStartMs,
@@ -178,3 +178,17 @@ export function StreamingVideoPlayer({
     </div>
   );
 }
+
+// Fix Issue 4: memoise so the player doesn't re-render (and thus re-init Plyr)
+// when the parent re-renders for unrelated state changes (search input, tab
+// switch, share modal open/close). Plyr re-init was the "frozen frame /
+// video doesn't play" symptom.
+export const StreamingVideoPlayer = memo(
+  StreamingVideoPlayerImpl,
+  (prev, next) =>
+    prev.videoUrl === next.videoUrl &&
+    prev.knownDurationMs === next.knownDurationMs &&
+    prev.trimStartMs === next.trimStartMs &&
+    prev.trimEndMs === next.trimEndMs &&
+    prev.onExpired === next.onExpired,
+);

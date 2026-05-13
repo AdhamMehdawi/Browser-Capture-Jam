@@ -659,11 +659,48 @@ async function handleRecordStop(): Promise<BgResponse> {
     readSasUrl: prev.readSasUrl,
   };
   pendingResult = null;
-  await chrome.runtime.sendMessage({ target: 'offscreen', kind: 'stop' });
+  // Fix Issue 7 (round 2): bound the offscreen `stop` message itself. If the
+  // offscreen document was torn down by Chrome (memory pressure, tab
+  // navigation), `sendMessage` to a non-existent listener can hang. Race it
+  // against a short timeout so we always proceed to the watchdog stage.
+  await Promise.race([
+    chrome.runtime.sendMessage({ target: 'offscreen', kind: 'stop' }).catch((e) => {
+      console.warn('[velocap/bg] offscreen stop sendMessage failed:', e);
+    }),
+    new Promise<void>((r) => setTimeout(r, 1500)),
+  ]);
 
-  // Wait for the offscreen 'upload-complete' message.
+  // Fix Issue 7: stop watchdog. If the offscreen never produces an
+  // upload-complete (recorder was inactive, offscreen was torn down by Chrome,
+  // upload PUT hung, etc.) the popup used to wait forever — button disabled,
+  // timer running, modal never opens. Cap the wait so the popup gets a clear
+  // failure instead of a deadlock.
   return new Promise<BgResponse>((resolve) => {
-    resultWaiters.push(resolve);
+    const watchdogMs = 30_000;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const wrapped = (r: BgResponse) => {
+      if (timer) clearTimeout(timer);
+      // Always tear down the overlay so the user gets visible confirmation
+      // that Stop took effect, even when the result is an error.
+      void hideOverlayIfAny().catch(() => undefined);
+      resolve(r);
+    };
+    resultWaiters.push(wrapped);
+    timer = setTimeout(() => {
+      // Only fire if no one else resolved first.
+      const idx = resultWaiters.indexOf(wrapped);
+      if (idx === -1) return;
+      resultWaiters.splice(idx, 1);
+      console.warn('[velocap/bg] record-stop watchdog tripped after', watchdogMs, 'ms');
+      state = { kind: 'idle' };
+      void closeOffscreen().catch(() => undefined);
+      void hideOverlayIfAny().catch(() => undefined);
+      resolve({
+        ok: false,
+        code: 'stop_timeout',
+        message: 'Recording did not finalize in time. Please try again.',
+      });
+    }, watchdogMs);
   });
 }
 
@@ -729,7 +766,15 @@ async function onUploadCompleteFromOffscreen(msg: {
             network: mergedNetwork,
             actions: mergedActions,
             device: endContext.device,
-            page: endContext.page,
+            // Fix Issue 10 (round 2): the user starts recording on page A,
+            // navigates to page B, then stops. The bug-report title should
+            // describe page A (where the issue was demoed), not page B.
+            // Prefer the start page's title/url; fall back to end if start
+            // was empty for any reason.
+            page:
+              startContext.page && (startContext.page.title || startContext.page.url)
+                ? startContext.page
+                : endContext.page,
           };
           console.log('[velocap/bg] merged context', {
             consoleCount: capturedContext.console.length,
@@ -997,6 +1042,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return false;
     }
     console.log('[velocap/bg] get-pending-preview: returning', state.bytes, 'bytes');
+    // Fix Issue 10: expose the captured page title so the preview modal can
+    // pre-fill the Title input (recordings without a title are hard to find
+    // later in the dashboard).
+    const pageTitle = state.capturedContext?.page?.title ?? '';
+    const pageUrl = state.capturedContext?.page?.url ?? '';
     sendResponse({
       readSasUrl: state.readSasUrl,
       screenshotDataUrl: state.screenshotDataUrl,
@@ -1004,6 +1054,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       bytes: state.bytes,
       mimeType: state.mediaType === 'screenshot' ? 'image/png' : 'video/webm',
       mediaType: state.mediaType,
+      pageTitle,
+      pageUrl,
       ...(state.note ? { note: state.note } : {}),
     });
     return false;

@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useParams, Link } from "wouter";
+import { useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { Scissors, RotateCcw } from "lucide-react";
 import { StreamingVideoPlayer } from "@/components/StreamingVideoPlayer";
@@ -283,6 +284,14 @@ export default function RecordingViewer() {
   }, [recording]);
 
   const createShareLink = useCreateShareLink();
+  // Fix Issue 3: after creating/retrieving a share token, refresh the cached
+  // recording so the next click sees the same token (instead of going through
+  // another mutate-and-overwrite race). Combined with backend idempotency,
+  // this keeps the Share and Copy-link buttons in lockstep.
+  const queryClient = useQueryClient();
+  const refreshRecording = () => {
+    void queryClient.invalidateQueries({ queryKey: getGetRecordingQueryKey(id) });
+  };
 
   const handleShare = () => {
     if (recording?.shareToken) {
@@ -298,10 +307,44 @@ export default function RecordingViewer() {
         setShareUrl(url);
         setShareModalOpen(true);
         toast.success("Share link created!");
+        refreshRecording();
       },
       onError: () => {
         toast.error("Failed to create share link");
       }
+    });
+  };
+
+  // Fix Issue 3: Copy link used to require opening the Share modal first
+  // because the share URL was generated lazily inside it. This handler
+  // copies the link straight to the clipboard, creating the share token
+  // on the fly when needed. No modal hop.
+  const [copyLinkCopied, setCopyLinkCopied] = useState(false);
+  const copyShareUrlToClipboard = async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopyLinkCopied(true);
+      setTimeout(() => setCopyLinkCopied(false), 1500);
+      toast.success("Link copied to clipboard");
+    } catch {
+      toast.error("Could not copy link");
+    }
+  };
+  const handleCopyLink = () => {
+    if (recording?.shareToken) {
+      const url = `${window.location.origin}/share/${recording.shareToken}`;
+      void copyShareUrlToClipboard(url);
+      return;
+    }
+    createShareLink.mutate({ id }, {
+      onSuccess: (res) => {
+        const url = `${window.location.origin}/share/${res.shareToken}`;
+        void copyShareUrlToClipboard(url);
+        refreshRecording();
+      },
+      onError: () => {
+        toast.error("Could not generate share link");
+      },
     });
   };
 
@@ -329,6 +372,29 @@ export default function RecordingViewer() {
       return true;
     }).sort((a, b) => a.timestamp - b.timestamp);
   }, [recording?.events, activeTab, search]);
+
+  // Fix Issue 4: previously `videoUrl` was computed inline at every render,
+  // which produced a new string each time even when the underlying SAS URL
+  // hadn't changed — that in turn re-mounted Plyr (visible as "video frozen
+  // / doesn't play"). Memoise on the actual underlying fields so the
+  // StreamingVideoPlayer's React.memo can short-circuit re-renders.
+  //
+  // IMPORTANT: this useMemo lives ABOVE the isLoading / !recording early
+  // returns. React enforces a stable hook count across renders; if it ran
+  // only after `recording` became defined we'd trip "Rendered more hooks
+  // than during the previous render."
+  const apiBase = import.meta.env.VITE_API_URL ?? "";
+  const recordingVideoUrl = (recording as any)?.videoUrl as string | undefined;
+  const recordingMediaPath = recording?.videoObjectPath;
+  const { videoUrl, screenshotUrl } = useMemo(() => {
+    const proxyUrl = recordingMediaPath ? `${apiBase}/api/storage${recordingMediaPath}` : null;
+    const isScreenshot = recordingMediaPath && /\.(png|jpg|jpeg|gif|webp)$/i.test(recordingMediaPath);
+    const resolved = recordingVideoUrl ?? proxyUrl;
+    return {
+      videoUrl: !isScreenshot ? resolved : null,
+      screenshotUrl: isScreenshot ? resolved : null,
+    };
+  }, [recordingMediaPath, recordingVideoUrl, apiBase]);
 
   const getLogIcon = (type: string, level?: string | null, status?: number | null) => {
     if (type === "request") {
@@ -421,14 +487,6 @@ export default function RecordingViewer() {
     return <div className="p-8 text-center text-muted-foreground">Recording not found.</div>;
   }
 
-  // Use SAS URLs from API response (direct Azure access), fall back to proxy URL
-  const apiBase = import.meta.env.VITE_API_URL ?? "";
-  const mediaPath = recording.videoObjectPath;
-  const proxyUrl = mediaPath ? `${apiBase}/api/storage${mediaPath}` : null;
-  const isScreenshot = mediaPath && /\.(png|jpg|jpeg|gif|webp)$/i.test(mediaPath);
-  const videoUrl = !isScreenshot ? ((recording as any).videoUrl ?? proxyUrl) : null;
-  const screenshotUrl = isScreenshot ? ((recording as any).videoUrl ?? proxyUrl) : null;
-
   const durationMs = recording.duration || 1;
   const fmtTime = (ms: number) => {
     const s = Math.round(ms / 1000);
@@ -498,6 +556,18 @@ export default function RecordingViewer() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {/* Fix Issue 3: dedicated Copy link button — works without opening
+              Share. Creates the share token on demand if not present. */}
+          <Button
+            onClick={handleCopyLink}
+            variant="outline"
+            disabled={createShareLink.isPending}
+            className="gap-2 font-medium active:scale-95 transition-transform"
+            title="Copy share link to clipboard"
+          >
+            {copyLinkCopied ? <Check size={16} /> : <Copy size={16} />}
+            {copyLinkCopied ? 'Copied' : 'Copy link'}
+          </Button>
           <Button onClick={handleShare} variant="outline" className="gap-2 font-medium active:scale-95 transition-transform">
             <Share2 size={16} /> Share
           </Button>

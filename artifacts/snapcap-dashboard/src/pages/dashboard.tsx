@@ -5,6 +5,7 @@ import { Search, Video, Clock, Globe, AlertCircle, LayoutGrid, List as ListIcon,
 import { useListRecordings, useGetRecordingStats, useDeleteRecording, getListRecordingsQueryKey, getGetRecordingStatsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { StatCard } from "@/components/StatCard";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -93,44 +94,99 @@ export default function Dashboard() {
           {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-[120px] rounded-xl" />)}
         </div>
       ) : stats ? (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between space-y-0 pb-2">
-                <p className="text-sm font-medium text-muted-foreground">Total Recordings</p>
-                <Video className="h-4 w-4 text-primary" />
-              </div>
-              <div className="text-3xl font-bold">{stats.totalRecordings}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between space-y-0 pb-2">
-                <p className="text-sm font-medium text-muted-foreground">Total Requests Logged</p>
-                <Globe className="h-4 w-4 text-blue-500" />
-              </div>
-              <div className="text-3xl font-bold">{stats.totalRequests.toLocaleString()}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between space-y-0 pb-2">
-                <p className="text-sm font-medium text-muted-foreground">Total Errors Captured</p>
-                <AlertCircle className="h-4 w-4 text-destructive" />
-              </div>
-              <div className="text-3xl font-bold">{stats.totalErrors.toLocaleString()}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between space-y-0 pb-2">
-                <p className="text-sm font-medium text-muted-foreground">Avg Error Rate</p>
-                <Activity className="h-4 w-4 text-orange-500" />
-              </div>
-              <div className="text-3xl font-bold">{stats.avgErrorRate.toFixed(1)}%</div>
-            </CardContent>
-          </Card>
-        </div>
+        /* Design feature #1: 7-day stats strip with deltas + sparklines.
+           Replaces the lifetime-totals cards — the design's whole point is
+           "what's happening this week, vs last week", not all-time. */
+        (() => {
+          const s = stats as any;
+          const captures7d = Number(s.captures7d ?? 0);
+          const capturesPrev = Number(s.captures7dPrev ?? 0);
+          const capturesDelta = captures7d - capturesPrev;
+
+          const avgDurMs = Number(s.avgDuration7dMs ?? 0);
+          const avgDurPrevMs = Number(s.avgDuration7dPrevMs ?? 0);
+          const fmtDur = (ms: number) => {
+            const sec = Math.round(ms / 1000);
+            const m = Math.floor(sec / 60);
+            const r = sec % 60;
+            return m > 0 ? `${m}:${String(r).padStart(2, "0")}` : `${r}s`;
+          };
+          const avgDurDeltaSec = Math.round((avgDurPrevMs - avgDurMs) / 1000);
+
+          const errors7d = Number(s.errors7d ?? 0);
+          const errorsPrev = Number(s.errors7dPrev ?? 0);
+          const errorsDelta = errors7d - errorsPrev;
+
+          const openLinks = Number(s.openShareLinks ?? 0);
+          const openLinksNew = Number(s.openShareLinks7dNew ?? 0);
+
+          // Build a 14-day sparkline series, filling zeros for missing dates.
+          const byDay = new Map<string, number>(
+            (s.capturesByDay ?? []).map((d: any) => [d.date, Number(d.count)]),
+          );
+          const today = new Date();
+          const sparkSeries: number[] = [];
+          for (let i = 13; i >= 0; i--) {
+            const d = new Date(today);
+            d.setDate(d.getDate() - i);
+            const iso = d.toISOString().slice(0, 10);
+            sparkSeries.push(byDay.get(iso) ?? 0);
+          }
+
+          return (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <StatCard
+                label="Captures · 7d"
+                value={captures7d.toLocaleString()}
+                deltaLabel={
+                  capturesPrev === 0
+                    ? `${captures7d} new`
+                    : `${capturesDelta >= 0 ? "+" : ""}${capturesDelta} from last week`
+                }
+                deltaTone={capturesDelta >= 0 ? "up" : "down"}
+                sparkline={sparkSeries}
+                sparkColor="#e8835a"
+              />
+              <StatCard
+                label="Errors · 7d"
+                value={errors7d.toLocaleString()}
+                deltaLabel={
+                  errorsPrev === 0
+                    ? `${errors7d} this week`
+                    : `${errorsDelta >= 0 ? "+" : ""}${errorsDelta} from last week`
+                }
+                /* Fewer errors is better — invert tone */
+                deltaTone={errorsDelta <= 0 ? "down-good" : "down"}
+                sparkColor="#ef6f6f"
+              />
+              <StatCard
+                label="Avg duration · 7d"
+                value={avgDurMs > 0 ? fmtDur(avgDurMs) : "—"}
+                deltaLabel={
+                  avgDurPrevMs === 0
+                    ? "no prior data"
+                    : avgDurDeltaSec === 0
+                      ? "unchanged"
+                      : `${avgDurDeltaSec > 0 ? "-" : "+"}${Math.abs(avgDurDeltaSec)}s vs last week`
+                }
+                /* Shorter recordings = good (less noise). */
+                deltaTone={avgDurDeltaSec >= 0 ? "down-good" : "neutral"}
+                sparkColor="#6ec38e"
+              />
+              <StatCard
+                label="Open share links"
+                value={openLinks.toLocaleString()}
+                deltaLabel={
+                  openLinksNew > 0
+                    ? `${openLinksNew} new this week`
+                    : "no new this week"
+                }
+                deltaTone={openLinksNew > 0 ? "up" : "neutral"}
+                sparkColor="#e8b85a"
+              />
+            </div>
+          );
+        })()
       ) : null}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

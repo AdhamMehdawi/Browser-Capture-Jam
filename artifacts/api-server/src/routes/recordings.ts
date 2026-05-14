@@ -112,6 +112,39 @@ router.get("/recordings/stats", async (req: any, res) => {
       .from(recordingsTable)
       .where(eq(recordingsTable.userId, userId));
 
+    // Feature #1 (design): 7-day windowed stats for the dashboard stats strip,
+    // each paired with the prior 7-day window so we can show a delta. All
+    // counts derive from existing columns — no new tables.
+    const [window7d] = await db
+      .select({
+        captures: sql<number>`count(*) filter (where ${recordingsTable.createdAt} >= now() - interval '7 days')`,
+        capturesPrev: sql<number>`count(*) filter (where ${recordingsTable.createdAt} >= now() - interval '14 days' and ${recordingsTable.createdAt} < now() - interval '7 days')`,
+        avgDuration: sql<number>`coalesce(avg(${recordingsTable.duration}) filter (where ${recordingsTable.createdAt} >= now() - interval '7 days'), 0)`,
+        avgDurationPrev: sql<number>`coalesce(avg(${recordingsTable.duration}) filter (where ${recordingsTable.createdAt} >= now() - interval '14 days' and ${recordingsTable.createdAt} < now() - interval '7 days'), 0)`,
+        errors: sql<number>`coalesce(sum(${recordingsTable.errorCount}) filter (where ${recordingsTable.createdAt} >= now() - interval '7 days'), 0)`,
+        errorsPrev: sql<number>`coalesce(sum(${recordingsTable.errorCount}) filter (where ${recordingsTable.createdAt} >= now() - interval '14 days' and ${recordingsTable.createdAt} < now() - interval '7 days'), 0)`,
+        openShareLinks: sql<number>`count(*) filter (where ${recordingsTable.shareToken} is not null)`,
+        openShareLinks7dNew: sql<number>`count(*) filter (where ${recordingsTable.shareToken} is not null and ${recordingsTable.createdAt} >= now() - interval '7 days')`,
+      })
+      .from(recordingsTable)
+      .where(eq(recordingsTable.userId, userId));
+
+    // Per-day capture counts for the last 30 days — used by sparklines.
+    const capturesByDay = await db
+      .select({
+        date: sql<string>`to_char(${recordingsTable.createdAt}::date, 'YYYY-MM-DD')`,
+        count: sql<number>`count(*)`,
+      })
+      .from(recordingsTable)
+      .where(
+        and(
+          eq(recordingsTable.userId, userId),
+          sql`${recordingsTable.createdAt} >= now() - interval '30 days'`,
+        ),
+      )
+      .groupBy(sql`${recordingsTable.createdAt}::date`)
+      .orderBy(sql`${recordingsTable.createdAt}::date`);
+
     const recentActivity = await db
       .select()
       .from(recordingsTable)
@@ -157,6 +190,7 @@ router.get("/recordings/stats", async (req: any, res) => {
         : 0;
 
     res.json({
+      // Lifetime totals (existing fields — kept for backward compatibility).
       totalRecordings: Number(totals.totalRecordings),
       totalDuration: Number(totals.totalDuration),
       totalRequests: Number(totals.totalRequests),
@@ -168,6 +202,19 @@ router.get("/recordings/stats", async (req: any, res) => {
         errorCount: Number(r.errorCount),
       })),
       requestsByDay: requestsByDay.map((r) => ({
+        date: r.date,
+        count: Number(r.count),
+      })),
+      // Feature #1 (design): 7-day windowed stats with prior-7d for deltas.
+      captures7d: Number(window7d.captures),
+      captures7dPrev: Number(window7d.capturesPrev),
+      avgDuration7dMs: Number(window7d.avgDuration),
+      avgDuration7dPrevMs: Number(window7d.avgDurationPrev),
+      errors7d: Number(window7d.errors),
+      errors7dPrev: Number(window7d.errorsPrev),
+      openShareLinks: Number(window7d.openShareLinks),
+      openShareLinks7dNew: Number(window7d.openShareLinks7dNew),
+      capturesByDay: capturesByDay.map((r) => ({
         date: r.date,
         count: Number(r.count),
       })),

@@ -1,10 +1,12 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useParams, Link } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { Scissors, RotateCcw } from "lucide-react";
 import { StreamingVideoPlayer } from "@/components/StreamingVideoPlayer";
 import { MouseHeatmap } from "@/components/MouseHeatmap";
+import { EventMinimap } from "@/components/EventMinimap";
+import { TrimBar } from "@/components/TrimBar";
 import {
   ArrowLeft, Share2, Globe, Terminal, MousePointerClick, Activity,
   Search, Info, Clock, AlertCircle, Play, Pause, AlertTriangle,
@@ -241,6 +243,10 @@ export default function RecordingViewer() {
   const [selectedLog, setSelectedLog] = useState<NetworkLogEntry | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
+  // Design feature #6: shared <video> element so EventMinimap can read
+  // currentTime + seek without prop-drilling through Plyr.
+  const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
+  const onVideoElement = useCallback((el: HTMLVideoElement | null) => setVideoEl(el), []);
 
   useEffect(() => {
     if (selectedLog) setDetailOpen(true);
@@ -591,15 +597,32 @@ export default function RecordingViewer() {
             <div className="h-full flex flex-col bg-muted/30 overflow-auto">
               <div className="flex items-start justify-center p-4 pt-6">
                 {videoUrl ? (
-                  <div className="w-full max-w-5xl">
+                  <div className="w-full max-w-5xl space-y-3">
                     <div className="rounded-lg shadow-lg bg-black">
                       <StreamingVideoPlayer
                         videoUrl={videoUrl}
                         knownDurationMs={recording.duration}
                         trimStartMs={trimActive ? trimStart : undefined}
                         trimEndMs={trimActive ? trimEnd : undefined}
+                        onVideoElement={onVideoElement}
                       />
                     </div>
+                    {/* Design feature #6: event minimap synced to the video. */}
+                    <EventMinimap
+                      events={recording.events ?? []}
+                      durationMs={recording.duration ?? 0}
+                      videoElement={videoEl}
+                    />
+                    {/* Design feature #7: visible trim bar with in/out points. */}
+                    <TrimBar
+                      durationMs={recording.duration ?? 0}
+                      startMs={trimStart}
+                      endMs={trimEnd || (recording.duration ?? 0)}
+                      active={trimActive}
+                      saving={trimSaving}
+                      onChange={handleTrimChange}
+                      onReset={handleResetTrim}
+                    />
                   </div>
                 ) : screenshotUrl ? (
                   <div className="w-full">

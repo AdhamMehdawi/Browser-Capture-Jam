@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, memo } from "react";
+import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import "plyr/dist/plyr.css";
 
@@ -8,6 +8,13 @@ interface StreamingVideoPlayerProps {
   trimStartMs?: number | null;
   trimEndMs?: number | null;
   onExpired?: () => void;
+  /**
+   * Design feature #6: invoked once the <video> element has mounted so
+   * a sibling component (e.g. EventMinimap) can read currentTime and
+   * call .currentTime = X to seek. Fires with `null` when the player
+   * unmounts.
+   */
+  onVideoElement?: (el: HTMLVideoElement | null) => void;
 }
 
 function StreamingVideoPlayerImpl({
@@ -16,6 +23,7 @@ function StreamingVideoPlayerImpl({
   trimStartMs,
   trimEndMs,
   onExpired,
+  onVideoElement,
 }: StreamingVideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const plyrRef = useRef<{ destroy(): void } | null>(null);
@@ -23,6 +31,17 @@ function StreamingVideoPlayerImpl({
   const [ready, setReady] = useState(false);
   const knownSec = knownDurationMs ? knownDurationMs / 1000 : 0;
   const trimStartSec = (trimStartMs ?? 0) / 1000;
+  // Stable ref callback so parent re-renders (e.g. trim drag updates) don't
+  // detach/reattach the <video> node and confuse Plyr's internal DOM
+  // bookkeeping (was throwing: "Failed to execute 'removeChild' on 'Node'").
+  const onVideoElementRef = useRef(onVideoElement);
+  useEffect(() => {
+    onVideoElementRef.current = onVideoElement;
+  }, [onVideoElement]);
+  const videoRefCallback = useCallback((el: HTMLVideoElement | null) => {
+    videoRef.current = el;
+    onVideoElementRef.current?.(el);
+  }, []);
   const trimEndSec = trimEndMs ? trimEndMs / 1000 : 0;
   const hasTrim = trimStartMs != null && trimEndMs != null;
 
@@ -168,7 +187,7 @@ function StreamingVideoPlayerImpl({
       >
         {!error ? (
           <video
-            ref={videoRef}
+            ref={videoRefCallback}
             src={videoUrl}
             className="w-full h-full"
             preload="auto"
@@ -255,5 +274,6 @@ export const StreamingVideoPlayer = memo(
     prev.knownDurationMs === next.knownDurationMs &&
     prev.trimStartMs === next.trimStartMs &&
     prev.trimEndMs === next.trimEndMs &&
-    prev.onExpired === next.onExpired,
+    prev.onExpired === next.onExpired &&
+    prev.onVideoElement === next.onVideoElement,
 );

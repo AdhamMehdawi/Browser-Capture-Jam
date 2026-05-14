@@ -1,9 +1,10 @@
-import { useState, useMemo, useEffect, Component } from "react";
+import { useState, useMemo, useEffect, useCallback, Component } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import { useParams, Link } from "wouter";
 import { format } from "date-fns";
 import { StreamingVideoPlayer } from "@/components/StreamingVideoPlayer";
 import { MouseHeatmap } from "@/components/MouseHeatmap";
+import { EventMinimap } from "@/components/EventMinimap";
 
 // ============================================================
 // SafariCommitErrorBoundary — last-resort safety net for the
@@ -178,6 +179,9 @@ export default function SharedRecordingViewer() {
   const [search, setSearch] = useState("");
   const [selectedLog, setSelectedLog] = useState<NetworkLogEntry | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  // Design feature #6: shared <video> handle for the EventMinimap below.
+  const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
+  const onVideoElement = useCallback((el: HTMLVideoElement | null) => setVideoEl(el), []);
 
   useEffect(() => {
     if (selectedLog) setDetailOpen(true);
@@ -312,15 +316,22 @@ export default function SharedRecordingViewer() {
             <div className="h-full flex flex-col bg-muted/30 overflow-auto">
               <div className="flex items-start justify-center p-4 pt-6">
                 {videoUrl ? (
-                  <div className="w-full max-w-5xl">
+                  <div className="w-full max-w-5xl space-y-3">
                     <div className="rounded-lg shadow-lg bg-black">
                       <StreamingVideoPlayer
                         videoUrl={videoUrl}
                         knownDurationMs={recording.duration}
                         trimStartMs={(recording as any).trimStartMs}
                         trimEndMs={(recording as any).trimEndMs}
+                        onVideoElement={onVideoElement}
                       />
                     </div>
+                    {/* Design feature #6: same event minimap as the dashboard. */}
+                    <EventMinimap
+                      events={recording.events ?? []}
+                      durationMs={recording.duration ?? 0}
+                      videoElement={videoEl}
+                    />
                   </div>
                 ) : screenshotUrl ? (
                   <div className="w-full max-w-5xl">

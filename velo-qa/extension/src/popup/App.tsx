@@ -252,6 +252,19 @@ function Ready({
   const [tick, setTick] = useState(0);
   const [copied, setCopied] = useState(false);
   const [withMic, setWithMic] = useState(false);
+  // Feature #12 follow-up: opt-in capture of JSON/text response bodies so
+  // HAR exports include actual payloads. Off by default — bodies-on can
+  // disturb streaming sites (see Issue 13). Persisted across popup opens.
+  const [captureBodies, setCaptureBodies] = useState(false);
+  useEffect(() => {
+    void chrome.storage.local.get('velocap.captureResponseBodies').then((r) => {
+      setCaptureBodies(r['velocap.captureResponseBodies'] === true);
+    });
+  }, []);
+  const toggleCaptureBodies = (v: boolean) => {
+    setCaptureBodies(v);
+    void chrome.storage.local.set({ 'velocap.captureResponseBodies': v });
+  };
   const tickRef = useRef<number | null>(null);
 
   const startTicker = useCallback(() => {
@@ -497,6 +510,14 @@ function Ready({
                 onChange={(e) => setWithMic(e.target.checked)}
               />
               Include microphone
+            </label>
+            <label className="mic-toggle" title="When ON, the extension reads JSON / text response bodies so HAR exports contain the actual payload. May affect streaming sites — leave OFF if you hit issues.">
+              <input
+                type="checkbox"
+                checked={captureBodies}
+                onChange={(e) => toggleCaptureBodies(e.target.checked)}
+              />
+              Capture response bodies (experimental)
             </label>
           </>
         )}

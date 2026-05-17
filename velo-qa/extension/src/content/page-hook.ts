@@ -573,17 +573,54 @@ async function readRequestBody(init?: RequestInit | Request): Promise<string | u
   return '[unreadable body]';
 }
 
-// Fix Issue 13: NEVER read response bodies. The previous implementation called
-// `res.clone().text()` to capture the body for bug-report logging, but this
-// breaks any site using streaming responses (MSE-based video players like
-// YouTube/Vimeo, long-poll endpoints, server-sent events). Even cloning races
-// with the page's own consumer on large chunks. We now record only a size
-// summary so the network panel still has useful metadata.
+// Fix Issue 13: by default, NEVER read response bodies — that broke YouTube
+// and other MSE-based streamers. Feature #12 follow-up: opt-in to read
+// JSON / text bodies for HAR exports. The content script (isolated world)
+// syncs the user's pref onto `document.documentElement.dataset.velocapBodies`
+// since page-hook can't read chrome.storage from MAIN world.
+const BODY_TEXTUAL = /^(application\/(json|x-www-form-urlencoded|ld\+json|problem\+json|xml)|text\/|application\/[a-z0-9.+-]+\+json)/i;
+const RESPONSE_BODY_CAP = 50_000; // 50 KB per response — keeps payloads sane
+
+function bodyCaptureEnabled(): boolean {
+  try {
+    // Strict opt-in: only "on" enables. We INTENTIONALLY don't fall back
+    // to "true if unset" — otherwise a fresh page load before the content
+    // script has stamped the dataset would silently capture bodies for
+    // sites that may not tolerate it.
+    return document.documentElement.dataset.velocapBodies === 'on';
+  } catch {
+    return false;
+  }
+}
+
 function summarizeResponse(res: Response): string | undefined {
   const ct = res.headers.get('content-type') || '';
   const len = res.headers.get('content-length');
   if (!ct && !len) return undefined;
   return len ? `[${ct || 'response'} ${len}B]` : `[${ct || 'response'}]`;
+}
+
+/**
+ * Best-effort body read. Returns undefined if disabled, if the body is
+ * binary/streaming/too-large, or if cloning fails. NEVER reads `res.body`
+ * directly — always operates on a clone so the page's consumer is unaffected.
+ */
+async function safeReadResponseBody(res: Response): Promise<string | undefined> {
+  if (!bodyCaptureEnabled()) return undefined;
+  const ct = res.headers.get('content-type') || '';
+  if (!BODY_TEXTUAL.test(ct)) return undefined; // binary / unknown / streaming
+  // Skip very large responses to avoid memory blowups.
+  const len = Number(res.headers.get('content-length') ?? 0);
+  if (len > 0 && len > RESPONSE_BODY_CAP * 4) return undefined;
+  try {
+    const text = await res.clone().text();
+    if (text.length > RESPONSE_BODY_CAP) {
+      return text.slice(0, RESPONSE_BODY_CAP) + `…[truncated ${text.length - RESPONSE_BODY_CAP}]`;
+    }
+    return text;
+  } catch {
+    return undefined;
+  }
 }
 
 const originalFetch = window.fetch;
@@ -628,15 +665,57 @@ window.fetch = async function patchedFetch(
     // Header collection is best-effort. Never let it block the request.
   }
   const requestHeaders = sanitizeHeaders(rawRequestHeaders);
-  // Request body capture: only safe types (string, URLSearchParams).
-  // Skip Blob/FormData/ReadableStream — reading them risks consuming.
+  // Request body capture. Expanded to cover every common shape:
+  //   • string         → captured as-is, truncated
+  //   • URLSearchParams → toString
+  //   • FormData       → flatten to k=v pairs (files marked as "[file:name]")
+  //   • Blob (small)   → text() if textual content-type AND ≤ 50KB
+  //   • ArrayBuffer    → "[ArrayBuffer Nbytes]" marker only
+  //   • ReadableStream → "[ReadableStream]" marker only (cannot read safely
+  //                       — would lock the stream the page hasn't sent yet)
   let requestBody: string | undefined;
   const initBody = init?.body;
-  if (typeof initBody === 'string') {
+  if (initBody == null) {
+    // no body — leave undefined
+  } else if (typeof initBody === 'string') {
     requestBody = sanitizeBody(truncate(initBody));
   } else if (initBody instanceof URLSearchParams) {
     requestBody = sanitizeBody(truncate(initBody.toString()));
-  } else if (initBody) {
+  } else if (typeof FormData !== 'undefined' && initBody instanceof FormData) {
+    try {
+      const parts: string[] = [];
+      initBody.forEach((v, k) => {
+        if (v instanceof File) parts.push(`${k}=[file:${v.name}:${v.size}B]`);
+        else if (typeof Blob !== 'undefined' && v instanceof Blob) parts.push(`${k}=[blob:${v.type || 'unknown'}:${v.size}B]`);
+        else parts.push(`${k}=${typeof v === 'string' ? v : '[object]'}`);
+      });
+      requestBody = sanitizeBody(truncate(parts.join('&')));
+    } catch {
+      requestBody = '[FormData]';
+    }
+  } else if (typeof Blob !== 'undefined' && initBody instanceof Blob) {
+    // Small textual Blobs are safe to read off a clone. Use the textual
+    // detector we already use for responses.
+    if (initBody.size <= 50_000 && BODY_TEXTUAL.test(initBody.type || '')) {
+      // We don't actually await this — keeping the fetch synchronous. Mark
+      // with a placeholder and queue an async read that posts a bodyUpdate
+      // for the request side too (matches the response-body pattern).
+      requestBody = `[blob:${initBody.type || 'unknown'}:${initBody.size}B reading…]`;
+      void initBody.text().then((text) => {
+        post('network-end', {
+          id,
+          requestBody: sanitizeBody(truncate(text)),
+          bodyUpdate: true,
+        });
+      }).catch(() => undefined);
+    } else {
+      requestBody = `[blob:${initBody.type || 'unknown'}:${initBody.size}B]`;
+    }
+  } else if (typeof ArrayBuffer !== 'undefined' && initBody instanceof ArrayBuffer) {
+    requestBody = `[ArrayBuffer:${initBody.byteLength}B]`;
+  } else if (typeof ReadableStream !== 'undefined' && initBody instanceof ReadableStream) {
+    requestBody = '[ReadableStream]';
+  } else {
     requestBody = `[${(initBody as Blob).constructor?.name ?? 'body'}]`;
   }
   const method = init?.method ?? (input instanceof Request ? input.method : 'GET');
@@ -658,6 +737,11 @@ window.fetch = async function patchedFetch(
     // `res.clone()`, `res.body`, or `.text()` — those break streaming
     // sites like YouTube. The returned response is handed straight to the
     // page's consumer untouched.
+    //
+    // We emit the network-end immediately with the size summary so the row
+    // appears in the log without any added latency to the page's fetch chain.
+    // If the user opted into body capture, we fire-and-forget a clone-read
+    // and post an update; the content-script bridge merges by id.
     post('network-end', {
       id,
       status: res.status,
@@ -665,6 +749,15 @@ window.fetch = async function patchedFetch(
       responseHeaders,
       responseBody: sanitizeBody(summarizeResponse(res)),
       durationMs: Date.now() - startedAt,
+    });
+    void safeReadResponseBody(res).then((body) => {
+      if (body == null) return;
+      post('network-end', {
+        id,
+        responseBody: sanitizeBody(body),
+        // Marker so the bridge knows this is an upgrade, not a duplicate.
+        bodyUpdate: true,
+      });
     });
     return res;
   } catch (e) {

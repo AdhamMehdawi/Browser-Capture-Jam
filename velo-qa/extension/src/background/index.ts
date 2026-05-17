@@ -865,30 +865,16 @@ async function onUploadCompleteFromOffscreen(msg: {
     // pending" acknowledgement. Upload URL comes later via bg:preview-upload.
     resolveResult({ ok: true, id: '', url: '' });
 
-    // Show the preview as an in-page popup (modal) on the recorded tab.
-    // Video plays from readSasUrl — no binary data in this message.
-    if (tabId != null) {
-      try {
-        // mimeType reflects whichever container we recorded (mp4 or webm).
-        const previewMime = objectPath?.toLowerCase().endsWith('.mp4')
-          ? 'video/mp4'
-          : 'video/webm';
-        await chrome.tabs.sendMessage(tabId, {
-          kind: 'preview:show',
-          readSasUrl,
-          durationMs: msg.durationMs,
-          bytes: msg.bytes,
-          mimeType: previewMime,
-          mediaType: 'video',
-          note: msg.note,
-        });
-      } catch (e) {
-        console.warn('[velocap/bg] preview:show failed; falling back to a tab', e);
-        void chrome.tabs.create({ url: chrome.runtime.getURL('src/preview/index.html') });
-      }
-    } else {
-      void chrome.tabs.create({ url: chrome.runtime.getURL('src/preview/index.html') });
-    }
+    // Open the preview as a dedicated tab. Previously we tried an in-page
+    // iframe modal first, but it silently failed in too many cases (recorded
+    // tab navigated away, page CSP rejecting our iframe, content script not
+    // present on chrome:// pages, etc.) — leaving the user with a finished
+    // recording and no visible UI. A new tab works in every case; the preview
+    // page pulls state via bg:get-pending-preview on load.
+    void chrome.tabs.create({
+      url: chrome.runtime.getURL('src/preview/index.html'),
+      active: true,
+    });
   } catch (e) {
     state = { kind: 'idle' };
     await closeOffscreen();

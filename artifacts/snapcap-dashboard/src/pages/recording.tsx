@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
-import { useParams, Link } from "wouter";
+import { useParams, Link, useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { Scissors, RotateCcw } from "lucide-react";
@@ -11,15 +11,26 @@ import {
   ArrowLeft, Share2, Globe, Terminal, MousePointerClick, Activity,
   Search, Info, Clock, AlertCircle, Play, Pause, AlertTriangle,
   TextCursorInput, MousePointer, Navigation, SquareMousePointer, CornerDownLeft,
-  X as CloseIcon, Copy, Check,
+  X as CloseIcon, Copy, Check, Download, Trash2,
 } from "lucide-react";
-import { useGetRecording, useCreateShareLink } from "@workspace/api-client-react";
+import { eventsToHar, downloadHar, safeFilenameForRecording } from "@/lib/harExport";
+import { useGetRecording, useCreateShareLink, useDeleteRecording, getListRecordingsQueryKey, getGetRecordingStatsQueryKey } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import { toast } from "sonner";
@@ -300,6 +311,31 @@ export default function RecordingViewer() {
     void queryClient.invalidateQueries({ queryKey: getGetRecordingQueryKey(id) });
   };
 
+  // Delete recording — feature add requested. Confirmation dialog gates the
+  // mutation; on success, navigate back to dashboard so the user isn't left
+  // looking at a stale recording page.
+  const [, setLocation] = useLocation();
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const deleteRecording = useDeleteRecording();
+  const confirmDelete = () => {
+    deleteRecording.mutate(
+      { id },
+      {
+        onSuccess: () => {
+          toast.success("Recording deleted");
+          queryClient.invalidateQueries({ queryKey: getListRecordingsQueryKey() });
+          queryClient.invalidateQueries({ queryKey: getGetRecordingStatsQueryKey() });
+          setDeleteOpen(false);
+          setLocation("/dashboard");
+        },
+        onError: (err) => {
+          console.error("Delete failed:", err);
+          toast.error("Failed to delete recording");
+        },
+      },
+    );
+  };
+
   const handleShare = () => {
     if (recording?.shareToken) {
       const url = `${window.location.origin}/share/${recording.shareToken}`;
@@ -337,6 +373,28 @@ export default function RecordingViewer() {
       toast.error("Could not copy link");
     }
   };
+  // Feature #12: export the network log as a HAR file. Drops straight to
+  // disk, no backend round-trip — all the request data is already in the
+  // events array. The download is a no-op if there are zero requests.
+  const handleExportHar = () => {
+    if (!recording) return;
+    const events = (recording.events ?? []) as any[];
+    const requestCount = events.filter((e) => e?.type === "request").length;
+    if (requestCount === 0) {
+      toast.error("No network requests captured in this recording");
+      return;
+    }
+    const har = eventsToHar({
+      recordingId: recording.id,
+      recordingTitle: recording.title ?? "",
+      pageUrl: recording.pageUrl ?? null,
+      events,
+      browserInfo: (recording as any).browserInfo ?? null,
+    });
+    downloadHar(safeFilenameForRecording(recording.title ?? "", recording.id), har);
+    toast.success(`Exported ${requestCount} request${requestCount === 1 ? "" : "s"} to HAR`);
+  };
+
   const handleCopyLink = () => {
     if (recording?.shareToken) {
       const url = `${window.location.origin}/share/${recording.shareToken}`;
@@ -570,6 +628,17 @@ export default function RecordingViewer() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {/* Feature #12: HAR export — downloads all captured network requests
+              as a standard HAR file, droppable into Chrome DevTools / Charles /
+              Postman / etc. for deep request inspection. */}
+          <Button
+            onClick={handleExportHar}
+            variant="outline"
+            className="gap-2 font-medium active:scale-95 transition-transform"
+            title="Download network log as HAR (open in Chrome DevTools)"
+          >
+            <Download size={16} /> HAR
+          </Button>
           {/* Fix Issue 3: dedicated Copy link button — works without opening
               Share. Creates the share token on demand if not present. */}
           <Button
@@ -584,6 +653,16 @@ export default function RecordingViewer() {
           </Button>
           <Button onClick={handleShare} variant="outline" className="gap-2 font-medium active:scale-95 transition-transform">
             <Share2 size={16} /> Share
+          </Button>
+          {/* Delete: separated from safe actions, hover-destructive coloring. */}
+          <Button
+            onClick={() => setDeleteOpen(true)}
+            variant="outline"
+            className="gap-2 font-medium active:scale-95 transition-transform text-muted-foreground hover:text-destructive hover:border-destructive/30"
+            title="Delete recording"
+            aria-label="Delete recording"
+          >
+            <Trash2 size={16} />
           </Button>
         </div>
       </header>
@@ -643,24 +722,39 @@ export default function RecordingViewer() {
           <div className="border-b border-border bg-card shrink-0 overflow-x-auto">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               <TabsList className="w-max min-w-full justify-start rounded-none border-0 bg-transparent h-auto p-0">
-                {[
-                  { value: 'info', label: 'Info', icon: <Info size={14} /> },
-                  { value: 'console', label: 'Console', icon: <Terminal size={14} /> },
-                  { value: 'request', label: 'Network', icon: <Globe size={14} /> },
-                  { value: 'actions', label: 'Actions', icon: <MousePointerClick size={14} /> },
-                  // Issue 12 (paused): Mouse tab hidden for now. Capture
-                  // pipeline + MouseHeatmap component remain wired so we can
-                  // re-enable by uncommenting this entry.
-                  // { value: 'mouse', label: 'Mouse', icon: <MousePointer size={14} /> },
-                ].map(tab => (
-                  <TabsTrigger
-                    key={tab.value}
-                    value={tab.value}
-                    className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 py-2.5 text-xs font-medium gap-1.5"
-                  >
-                    {tab.label}
-                  </TabsTrigger>
-                ))}
+                {(() => {
+                  // Inline tab counts (design spec). Counted from the full
+                  // events array, not the filtered view, so the chip always
+                  // reflects "how many of this kind exist", not "how many
+                  // match the current search".
+                  const all = recording.events ?? [];
+                  const consoleCount = all.filter((e: any) => e.type === 'console' || e.type === 'error' || e.type === 'unhandledrejection').length;
+                  const networkCount = all.filter((e: any) => e.type === 'request').length;
+                  const actionsCount = all.filter((e: any) =>
+                    e.type === 'click' || e.type === 'input' || e.type === 'select' ||
+                    e.type === 'submit' || e.type === 'navigation'
+                  ).length;
+                  const tabs = [
+                    { value: 'info', label: 'Info', count: null as number | null },
+                    { value: 'console', label: 'Console', count: consoleCount },
+                    { value: 'request', label: 'Network', count: networkCount },
+                    { value: 'actions', label: 'Actions', count: actionsCount },
+                  ];
+                  return tabs.map((tab) => (
+                    <TabsTrigger
+                      key={tab.value}
+                      value={tab.value}
+                      className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 py-2.5 text-xs font-medium gap-1.5"
+                    >
+                      {tab.label}
+                      {tab.count != null && tab.count > 0 && (
+                        <span className="ml-1.5 inline-flex items-center justify-center min-w-4.5 h-4.5 px-1 rounded-md text-[10px] font-mono tabular-nums bg-muted text-muted-foreground data-[state=active]:bg-primary/15 data-[state=active]:text-primary">
+                          {tab.count > 999 ? '999+' : tab.count}
+                        </span>
+                      )}
+                    </TabsTrigger>
+                  ));
+                })()}
               </TabsList>
             </Tabs>
           </div>
@@ -1217,6 +1311,29 @@ export default function RecordingViewer() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Delete confirmation. */}
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this recording?</AlertDialogTitle>
+            <AlertDialogDescription>
+              "{recording.title}" will be permanently removed, along with its video,
+              events, and any share links. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteRecording.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              disabled={deleteRecording.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteRecording.isPending ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

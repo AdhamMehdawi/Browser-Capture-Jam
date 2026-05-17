@@ -59,53 +59,73 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* Design Layer A — warm editorial palette pulled from screens.html.
+   - Light mode: warm paper #f1ede4 surface, coral accent at deeper #c64a3a
+     (matches screens.html's `--page-accent`).
+   - Dark mode (.dark): near-black #0e0f12 canvas, coral accent #e8835a.
+   Both modes share Geist body, Geist Mono labels, Instrument Serif italic
+   for display titles. The active class is set on <html> by ThemeProvider. */
 :root {
-  --button-outline: rgba(0,0,0, .10);
+  --button-outline: rgba(0,0,0, .08);
   --badge-outline: rgba(0,0,0, .05);
   --opaque-button-border-intensity: -8;
   --elevate-1: rgba(0,0,0, .03);
-  --elevate-2: rgba(0,0,0, .08);
+  --elevate-2: rgba(0,0,0, .06);
 
-  --background: 0 0% 100%;
-  --foreground: 240 10% 10%;
-  --border: 240 5.9% 90%;
-  --input: 240 5.9% 90%;
-  --ring: 260 80% 65%;
+  /* Page surface = warm paper #f1ede4 ≈ hsl(42 25% 92%) */
+  --background: 42 25% 92%;
+  --foreground: 0 0% 10%;              /* #1a1a1a */
+  --border: 41 18% 76%;                /* #cdc6b6 */
+  --input: 41 18% 86%;
+  --ring: 8 56% 51%;                   /* deeper coral focus ring */
+
+  /* Card surface = #ffffff */
   --card: 0 0% 100%;
-  --card-foreground: 240 10% 10%;
-  --card-border: 240 5.9% 90%;
+  --card-foreground: 0 0% 10%;
+  --card-border: 41 18% 80%;
+
   --popover: 0 0% 100%;
-  --popover-foreground: 240 10% 10%;
-  --popover-border: 240 5.9% 90%;
-  
-  --primary: 260 80% 55%;
+  --popover-foreground: 0 0% 10%;
+  --popover-border: 41 18% 76%;
+
+  /* Primary = deeper coral #c64a3a ≈ hsl(8 56% 51%) — readable on paper. */
+  --primary: 8 56% 51%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 240 4.8% 95.9%;
-  --secondary-foreground: 240 5.9% 10%;
-  --muted: 240 4.8% 95.9%;
-  --muted-foreground: 240 3.8% 46.1%;
-  --accent: 240 4.8% 95.9%;
-  --accent-foreground: 240 5.9% 10%;
-  --destructive: 0 84.2% 60.2%;
-  --destructive-foreground: 0 0% 98%;
+  /* Secondary surface = #e8e3d6 */
+  --secondary: 42 20% 87%;
+  --secondary-foreground: 0 0% 10%;
+  /* Muted matches secondary; softer ink at #5a564d */
+  --muted: 42 20% 87%;
+  --muted-foreground: 39 8% 33%;
+  /* Accent surface — slightly warmer for hover */
+  --accent: 42 22% 82%;
+  --accent-foreground: 0 0% 10%;
+  /* Destructive = brand coral-red */
+  --destructive: 0 70% 56%;
+  --destructive-foreground: 0 0% 100%;
 
-  --sidebar: 240 5% 96%;
-  --sidebar-foreground: 240 5.3% 26.1%;
-  --sidebar-border: 240 5.9% 90%;
-  --sidebar-primary: 260 80% 55%;
+  --sidebar: 42 22% 89%;
+  --sidebar-foreground: 39 8% 33%;
+  --sidebar-border: 41 18% 76%;
+  --sidebar-primary: 8 56% 51%;
   --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 240 4.8% 90%;
-  --sidebar-accent-foreground: 240 5.9% 10%;
-  --sidebar-ring: 260 80% 65%;
+  --sidebar-accent: 42 22% 82%;
+  --sidebar-accent-foreground: 0 0% 10%;
+  --sidebar-ring: 8 56% 51%;
 
-  --chart-1: 260 80% 55%;
-  --chart-2: 280 60% 50%;
-  --chart-3: 300 50% 45%;
-  --chart-4: 320 40% 40%;
-  --chart-5: 340 30% 35%;
+  /* Chart palette — same hues as dark mode, slightly deepened for paper. */
+  --chart-1: 8 56% 51%;                /* coral */
+  --chart-2: 226 80% 60%;              /* brand-blue */
+  --chart-3: 138 38% 45%;              /* ok green */
+  --chart-4: 41 70% 50%;               /* warn amber */
+  --chart-5: 0 70% 56%;                /* err red */
 
-  --app-font-sans: 'Inter', system-ui, sans-serif;
-  --app-font-mono: 'Space Mono', 'Menlo', monospace;
+  /* Typography — Layer A. Instrument Serif lives as a Tailwind utility
+     (see body class), Geist is the default sans, Geist Mono everywhere
+     a mono / timestamp / label appears. */
+  --app-font-sans: 'Geist', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --app-font-mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --app-font-display: 'Instrument Serif', Georgia, serif;
   --radius: 0.5rem;
 
   --sidebar-primary-border: hsl(var(--sidebar-primary));
@@ -117,6 +137,9 @@
   --destructive-border: hsl(var(--destructive));
 }
 
+/* Warm-dark editorial — applied via `.dark` class on <html>. The
+   ThemeProvider component manages add/remove based on user choice
+   (light / dark / system) persisted in localStorage. */
 .dark {
   --button-outline: rgba(255,255,255, .10);
   --badge-outline: rgba(255,255,255, .05);
@@ -124,39 +147,46 @@
   --elevate-1: rgba(255,255,255, .04);
   --elevate-2: rgba(255,255,255, .09);
 
-  --background: 240 10% 4%;
-  --foreground: 0 0% 98%;
-  --border: 240 10% 15%;
-  --input: 240 10% 15%;
-  --ring: 260 80% 65%;
-  
-  --card: 240 10% 6%;
-  --card-foreground: 0 0% 98%;
-  --card-border: 240 10% 12%;
-  
-  --popover: 240 10% 6%;
-  --popover-foreground: 0 0% 98%;
-  --popover-border: 240 10% 15%;
-  
-  --primary: 260 80% 65%;
-  --primary-foreground: 0 0% 100%;
-  --secondary: 240 10% 12%;
-  --secondary-foreground: 0 0% 98%;
-  --muted: 240 10% 12%;
-  --muted-foreground: 240 5% 65%;
-  --accent: 240 10% 12%;
-  --accent-foreground: 0 0% 98%;
-  --destructive: 0 62.8% 30.6%;
+  --background: 225 13% 6%;            /* #0e0f12 */
+  --foreground: 50 14% 92%;            /* #ecebe5 */
+  --border: 222 13% 19%;               /* #2a2e37 */
+  --input: 222 13% 19%;
+  --ring: 17 75% 64%;                  /* coral focus ring */
+
+  --card: 220 13% 11%;                 /* #181b21 */
+  --card-foreground: 50 14% 92%;
+  --card-border: 222 13% 19%;
+
+  --popover: 220 13% 12%;
+  --popover-foreground: 50 14% 92%;
+  --popover-border: 222 13% 19%;
+
+  --primary: 17 75% 64%;               /* #e8835a coral */
+  --primary-foreground: 24 30% 8%;     /* near-black text on coral */
+  --secondary: 220 13% 14%;
+  --secondary-foreground: 50 14% 92%;
+  --muted: 220 13% 14%;
+  --muted-foreground: 50 6% 69%;       /* #b6b3a8 */
+  --accent: 222 12% 17%;               /* #262a32 hover surface */
+  --accent-foreground: 50 14% 92%;
+  --destructive: 0 80% 69%;            /* #ef6f6f */
   --destructive-foreground: 0 0% 98%;
 
-  --sidebar: 240 10% 6%;
-  --sidebar-foreground: 240 5% 70%;
-  --sidebar-border: 240 10% 12%;
-  --sidebar-primary: 260 80% 65%;
-  --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 240 10% 15%;
-  --sidebar-accent-foreground: 0 0% 98%;
-  --sidebar-ring: 260 80% 65%;
+  --sidebar: 222 13% 9%;               /* #14161b */
+  --sidebar-foreground: 50 6% 69%;
+  --sidebar-border: 222 13% 19%;
+  --sidebar-primary: 17 75% 64%;
+  --sidebar-primary-foreground: 24 30% 8%;
+  --sidebar-accent: 222 12% 17%;
+  --sidebar-accent-foreground: 50 14% 92%;
+  --sidebar-ring: 17 75% 64%;
+
+  /* Chart palette matches the EventMinimap colors exactly. */
+  --chart-1: 17 75% 64%;
+  --chart-2: 226 100% 74%;
+  --chart-3: 138 38% 60%;
+  --chart-4: 41 75% 63%;
+  --chart-5: 0 80% 69%;
 }
 
 @keyframes shimmer {
@@ -169,11 +199,26 @@
   }
   body {
     @apply font-sans antialiased text-foreground selection:bg-primary/30;
-    background-color: hsl(250 30% 98%);
+    /* Layer A: warm-dark canvas to match screens.html. */
+    background-color: hsl(var(--background));
     min-height: 100dvh;
   }
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]) {
     cursor: pointer;
+  }
+  /* Layer A typography utilities. Use `.font-display` for headings that
+     should pick up the Instrument Serif italic accent (e.g. the recording
+     title or marketing hero). Tabular numerals for any timestamp/stat value
+     in mono context — keeps columns aligned. */
+  .font-display {
+    font-family: var(--app-font-display);
+    font-style: italic;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+  }
+  .font-mono {
+    font-family: var(--app-font-mono);
+    font-feature-settings: 'ss01' on, 'ss02' on;
   }
 }

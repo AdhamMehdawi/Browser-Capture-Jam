@@ -129,11 +129,15 @@ router.get("/recordings/stats", async (req: any, res) => {
       .from(recordingsTable)
       .where(eq(recordingsTable.userId, userId));
 
-    // Per-day capture counts for the last 30 days — used by sparklines.
-    const capturesByDay = await db
+    // Per-day series for the last 30 days — drives all four stat-card
+    // sparklines. One query, four aggregates so we don't round-trip 4×.
+    const seriesByDay = await db
       .select({
         date: sql<string>`to_char(${recordingsTable.createdAt}::date, 'YYYY-MM-DD')`,
-        count: sql<number>`count(*)`,
+        captures: sql<number>`count(*)`,
+        errors: sql<number>`coalesce(sum(${recordingsTable.errorCount}), 0)`,
+        avgDuration: sql<number>`coalesce(avg(${recordingsTable.duration}), 0)`,
+        shares: sql<number>`count(*) filter (where ${recordingsTable.shareToken} is not null)`,
       })
       .from(recordingsTable)
       .where(
@@ -144,6 +148,13 @@ router.get("/recordings/stats", async (req: any, res) => {
       )
       .groupBy(sql`${recordingsTable.createdAt}::date`)
       .orderBy(sql`${recordingsTable.createdAt}::date`);
+
+    // Keep the existing capturesByDay shape for back-compat consumers; the
+    // new series ride alongside it.
+    const capturesByDay = seriesByDay.map((r) => ({ date: r.date, count: Number(r.captures) }));
+    const errorsByDay = seriesByDay.map((r) => ({ date: r.date, count: Number(r.errors) }));
+    const avgDurationByDay = seriesByDay.map((r) => ({ date: r.date, ms: Number(r.avgDuration) }));
+    const sharesByDay = seriesByDay.map((r) => ({ date: r.date, count: Number(r.shares) }));
 
     const recentActivity = await db
       .select()
@@ -214,10 +225,10 @@ router.get("/recordings/stats", async (req: any, res) => {
       errors7dPrev: Number(window7d.errorsPrev),
       openShareLinks: Number(window7d.openShareLinks),
       openShareLinks7dNew: Number(window7d.openShareLinks7dNew),
-      capturesByDay: capturesByDay.map((r) => ({
-        date: r.date,
-        count: Number(r.count),
-      })),
+      capturesByDay,
+      errorsByDay,
+      avgDurationByDay,
+      sharesByDay,
     });
   } catch (err) {
     req.log.error({ err }, "Failed to get stats");

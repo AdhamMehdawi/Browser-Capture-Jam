@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter";
 import { useUser, useClerk } from "@clerk/react";
 import { Activity, Settings, LogOut, Menu, ChevronDown, Download } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { ThemeToggle } from "@/components/ThemeProvider";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -60,6 +61,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               <span className="hidden sm:inline">Get Chrome Extension</span>
               <span className="sm:hidden">Extension</span>
             </a>
+
+            <ThemeToggle />
 
             {user && (
             <DropdownMenu>

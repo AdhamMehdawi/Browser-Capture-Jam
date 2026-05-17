@@ -6,6 +6,16 @@ import { useListRecordings, useGetRecordingStats, useDeleteRecording, getListRec
 import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { StatCard } from "@/components/StatCard";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,35 +39,38 @@ export default function Dashboard() {
 
   const deleteRecording = useDeleteRecording();
 
-  const handleDelete = async (id: string, e: React.MouseEvent) => {
+  // Track which recording the user wants to delete so we can show a
+  // confirmation dialog instead of dropping it on the first click.
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; title: string } | null>(null);
+
+  const handleDelete = (id: string, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    const r = recordingsData?.recordings?.find((x: any) => x.id === id);
+    setPendingDelete({ id, title: r?.title ?? "this recording" });
+  };
 
-    console.log("Delete clicked for id:", id);
-
-    try {
-      // Direct fetch as a workaround
-      const apiBase = import.meta.env.VITE_API_URL ?? "";
-      const response = await fetch(`${apiBase}/api/recordings/${id}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-
-      console.log("Delete response:", response.status);
-
-      if (response.ok) {
-        toast.success("Recording deleted");
-        queryClient.invalidateQueries({ queryKey: getListRecordingsQueryKey() });
-        queryClient.invalidateQueries({ queryKey: getGetRecordingStatsQueryKey() });
-      } else {
-        const errorText = await response.text();
-        console.error("Delete failed:", response.status, errorText);
-        toast.error("Failed to delete recording");
-      }
-    } catch (error) {
-      console.error("Delete error:", error);
-      toast.error("Failed to delete recording");
-    }
+  const confirmDelete = () => {
+    if (!pendingDelete) return;
+    const { id } = pendingDelete;
+    // Use the typed hook so the Clerk Bearer token rides along — direct fetch
+    // would 401 outside of MOCK_AUTH mode.
+    deleteRecording.mutate(
+      { id },
+      {
+        onSuccess: () => {
+          toast.success("Recording deleted");
+          queryClient.invalidateQueries({ queryKey: getListRecordingsQueryKey() });
+          queryClient.invalidateQueries({ queryKey: getGetRecordingStatsQueryKey() });
+          setPendingDelete(null);
+        },
+        onError: (err) => {
+          console.error("Delete failed:", err);
+          toast.error("Failed to delete recording");
+          setPendingDelete(null);
+        },
+      },
+    );
   };
 
   const formatDuration = (ms: number) => {
@@ -71,7 +84,7 @@ export default function Dashboard() {
     <div className="p-8 max-w-[1600px] mx-auto space-y-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+          <h1 className="text-4xl font-display tracking-tight">Captures</h1>
           <p className="text-muted-foreground mt-1">Overview of your recording activity and stats.</p>
         </div>
         <div className="flex items-center gap-3">
@@ -120,18 +133,25 @@ export default function Dashboard() {
           const openLinks = Number(s.openShareLinks ?? 0);
           const openLinksNew = Number(s.openShareLinks7dNew ?? 0);
 
-          // Build a 14-day sparkline series, filling zeros for missing dates.
-          const byDay = new Map<string, number>(
-            (s.capturesByDay ?? []).map((d: any) => [d.date, Number(d.count)]),
-          );
+          // Build 14-day sparkline series for each card, filling zeros for
+          // missing dates. Helper keeps the four card declarations clean.
           const today = new Date();
-          const sparkSeries: number[] = [];
-          for (let i = 13; i >= 0; i--) {
-            const d = new Date(today);
-            d.setDate(d.getDate() - i);
-            const iso = d.toISOString().slice(0, 10);
-            sparkSeries.push(byDay.get(iso) ?? 0);
-          }
+          const sparkFrom = (series: any[] | undefined, field: string): number[] => {
+            const byDay = new Map<string, number>(
+              (series ?? []).map((d: any) => [d.date, Number(d[field] ?? 0)]),
+            );
+            const out: number[] = [];
+            for (let i = 13; i >= 0; i--) {
+              const d = new Date(today);
+              d.setDate(d.getDate() - i);
+              out.push(byDay.get(d.toISOString().slice(0, 10)) ?? 0);
+            }
+            return out;
+          };
+          const sparkCaptures = sparkFrom(s.capturesByDay, "count");
+          const sparkErrors = sparkFrom(s.errorsByDay, "count");
+          const sparkDuration = sparkFrom(s.avgDurationByDay, "ms").map((ms) => ms / 1000);
+          const sparkShares = sparkFrom(s.sharesByDay, "count");
 
           return (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -144,7 +164,7 @@ export default function Dashboard() {
                     : `${capturesDelta >= 0 ? "+" : ""}${capturesDelta} from last week`
                 }
                 deltaTone={capturesDelta >= 0 ? "up" : "down"}
-                sparkline={sparkSeries}
+                sparkline={sparkCaptures}
                 sparkColor="#e8835a"
               />
               <StatCard
@@ -155,8 +175,8 @@ export default function Dashboard() {
                     ? `${errors7d} this week`
                     : `${errorsDelta >= 0 ? "+" : ""}${errorsDelta} from last week`
                 }
-                /* Fewer errors is better — invert tone */
                 deltaTone={errorsDelta <= 0 ? "down-good" : "down"}
+                sparkline={sparkErrors}
                 sparkColor="#ef6f6f"
               />
               <StatCard
@@ -169,8 +189,8 @@ export default function Dashboard() {
                       ? "unchanged"
                       : `${avgDurDeltaSec > 0 ? "-" : "+"}${Math.abs(avgDurDeltaSec)}s vs last week`
                 }
-                /* Shorter recordings = good (less noise). */
                 deltaTone={avgDurDeltaSec >= 0 ? "down-good" : "neutral"}
+                sparkline={sparkDuration}
                 sparkColor="#6ec38e"
               />
               <StatCard
@@ -182,6 +202,7 @@ export default function Dashboard() {
                     : "no new this week"
                 }
                 deltaTone={openLinksNew > 0 ? "up" : "neutral"}
+                sparkline={sparkShares}
                 sparkColor="#e8b85a"
               />
             </div>
@@ -491,6 +512,32 @@ export default function Dashboard() {
           </Card>
         </div>
       </div>
+
+      {/* Delete confirmation. */}
+      <AlertDialog
+        open={pendingDelete != null}
+        onOpenChange={(open) => { if (!open) setPendingDelete(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete recording?</AlertDialogTitle>
+            <AlertDialogDescription>
+              "{pendingDelete?.title}" will be permanently removed, along with its video,
+              events, and any share links. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteRecording.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              disabled={deleteRecording.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteRecording.isPending ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

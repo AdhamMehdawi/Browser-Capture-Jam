@@ -154,6 +154,12 @@ This is a **new flow**: same viewer with a bottom drawer for comments + assignee
 
 ---
 
+## Backlog — additions requested mid-implementation
+
+- **Delete recording from the dashboard** — row action on the list (and the recording detail page). Calls the existing `DELETE /api/recordings/:id` (already implemented and used in dashboard.tsx, but only with a small icon; needs a confirmation prompt + bulk-select integration). Roughly 30 min once we want it. Tracking here so it doesn't get lost.
+- **Draggable on-page recording overlay** — IMPLEMENTED. Bar can be dragged anywhere on the page; position persists across reloads.
+- **Preview tab instead of in-page iframe** — IMPLEMENTED after the iframe modal silently failed in too many cases. Preview now always opens as a new tab.
+
 ## What I'll NOT change
 
 - The Plyr video player itself — keep the current StreamingVideoPlayer behaviour, just restyle its container.

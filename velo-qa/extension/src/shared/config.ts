@@ -13,6 +13,12 @@ export const STORAGE_KEYS = {
   auth: 'velocap.auth',
   activeWorkspaceId: 'velocap.activeWorkspaceId',
   consentGiven: 'velocap.consentGiven',
+  /**
+   * Feature #12 follow-up: opt-in capture of JSON/text response bodies so
+   * HAR exports show the actual payload. Off by default — bodies-on can
+   * disturb streaming sites (see Issue 13). Boolean.
+   */
+  captureResponseBodies: 'velocap.captureResponseBodies',
 } as const;
 
 /** Bump this when the privacy policy changes materially to re-trigger consent. */

@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/reac
 import { setAuthTokenGetter } from "@workspace/api-client-react";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ThemeProvider } from "@/components/ThemeProvider";
 import NotFound from "@/pages/not-found";
 import Privacy from "@/pages/privacy";
 import Home from "@/pages/home";
@@ -203,10 +204,12 @@ function ClerkProviderWithRoutes() {
       <QueryClientProvider client={queryClient}>
         <ClerkApiTokenBridge />
         <ClerkQueryClientCacheInvalidator />
-        <TooltipProvider>
-          <Router />
-        </TooltipProvider>
-        <Toaster />
+        <ThemeProvider>
+          <TooltipProvider>
+            <Router />
+          </TooltipProvider>
+          <Toaster />
+        </ThemeProvider>
       </QueryClientProvider>
     </ClerkProvider>
   );

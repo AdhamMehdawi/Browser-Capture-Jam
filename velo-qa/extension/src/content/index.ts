@@ -28,6 +28,41 @@ console.info(
   'color:#ff4d7e;font-weight:bold',
 );
 
+// Feature #12 follow-up: surface the "capture response bodies" preference to
+// the MAIN-world page-hook via a document dataset attribute. Page-hook can't
+// read chrome.storage directly (different world). We sync the flag on load
+// AND on changes so toggling in the popup propagates without page reload.
+(function pipeBodyCapturePref(): void {
+  const setFlag = (on: boolean) => {
+    const apply = () => {
+      try {
+        const el = document.documentElement;
+        if (!el) {
+          requestAnimationFrame(apply);
+          return;
+        }
+        el.dataset.velocapBodies = on ? 'on' : 'off';
+        // Diagnostic log so we can see in console whether the flag landed
+        // and when. eslint-disable to allow the marker.
+        // eslint-disable-next-line no-console
+        console.debug('[velocap/content] bodies flag =', on ? 'on' : 'off');
+      } catch {
+        requestAnimationFrame(apply);
+      }
+    };
+    apply();
+  };
+  void chrome.storage.local.get('velocap.captureResponseBodies').then((r) => {
+    setFlag(r['velocap.captureResponseBodies'] === true);
+  });
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    const ch = changes['velocap.captureResponseBodies'];
+    if (!ch) return;
+    setFlag(ch.newValue === true);
+  });
+})();
+
 // --- Buffer events coming out of the hook.
 window.addEventListener('message', (event) => {
   if (event.source !== window) return;
@@ -46,7 +81,18 @@ window.addEventListener('message', (event) => {
     const p = data.payload as NetworkEntry;
     networkPending.set(p.id, p);
   } else if (data.kind === 'network-end') {
-    const end = data.payload as Partial<NetworkEntry> & { id: string };
+    const end = data.payload as Partial<NetworkEntry> & { id: string; bodyUpdate?: boolean };
+    // Feature #12 follow-up: a `bodyUpdate` marker means this is the deferred
+    // body-capture upgrade. Patch the existing row in-place instead of treating
+    // it as a fresh end event.
+    if (end.bodyUpdate) {
+      const existing = networkBuffer.find((n) => n.id === end.id);
+      if (existing) {
+        if (end.responseBody) existing.responseBody = end.responseBody;
+        if (end.requestBody) existing.requestBody = end.requestBody;
+      }
+      return;
+    }
     const start = networkPending.get(end.id);
     if (!start) return;
     networkPending.delete(end.id);
@@ -148,14 +194,59 @@ function fmtElapsed(ms: number): string {
   return `${mm}:${String(ss).padStart(2, '0')}`;
 }
 
+// Storage key for the user's preferred overlay position. Persists across
+// pages so the bar stays where the user dragged it.
+const OVERLAY_POS_KEY = 'velocap.overlayPosition';
+const OVERLAY_DEFAULT_TOP = 12;
+const OVERLAY_DEFAULT_LEFT_RATIO = 0.5; // centered horizontally
+const OVERLAY_W_ESTIMATE = 200;
+const OVERLAY_H_ESTIMATE = 38;
+const OVERLAY_EDGE_GAP = 6;
+
+function clampOverlayPosition(top: number, left: number): { top: number; left: number } {
+  const maxTop = Math.max(OVERLAY_EDGE_GAP, window.innerHeight - OVERLAY_H_ESTIMATE - OVERLAY_EDGE_GAP);
+  const maxLeft = Math.max(OVERLAY_EDGE_GAP, window.innerWidth - OVERLAY_W_ESTIMATE - OVERLAY_EDGE_GAP);
+  return {
+    top: Math.max(OVERLAY_EDGE_GAP, Math.min(maxTop, top)),
+    left: Math.max(OVERLAY_EDGE_GAP, Math.min(maxLeft, left)),
+  };
+}
+
 function showOverlay(startedAt: number): void {
+  // eslint-disable-next-line no-console
+  console.info('[velocap/overlay] showOverlay called, existing host:', !!overlayHost, 'startedAt:', startedAt);
   if (overlayHost) return; // already shown
   overlayStartedAt = startedAt || Date.now();
 
+  if (!document.documentElement && !document.body) {
+    // Document not ready yet — retry shortly. Can happen on document_start
+    // injection before <html> has fully parsed.
+    setTimeout(() => showOverlay(startedAt), 100);
+    return;
+  }
+
   overlayHost = document.createElement('div');
   overlayHost.setAttribute('data-velocap-overlay', '');
+  // Initial position: try stored, else centered top. Stored value loads
+  // asynchronously below — show at default until it resolves to avoid jank.
+  // Clamp the initial value too so a narrow viewport can't push us off-screen.
+  const rawLeft = Math.round(window.innerWidth * OVERLAY_DEFAULT_LEFT_RATIO - OVERLAY_W_ESTIMATE / 2);
+  const init = clampOverlayPosition(OVERLAY_DEFAULT_TOP, rawLeft);
+  // `display: block` is essential — `all: initial` resets a <div> to
+  // `display: inline`, which can render zero-height on some sites despite
+  // position:fixed (CSP-restricted shadow stylesheets are the usual cause).
   overlayHost.style.cssText =
-    'all: initial; position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 2147483647; pointer-events: auto;';
+    `all: initial; display: block; position: fixed; top: ${init.top}px; left: ${init.left}px; z-index: 2147483647; pointer-events: auto;`;
+
+  // Load persisted position (best effort — we already painted at default).
+  void chrome.storage.local.get(OVERLAY_POS_KEY).then((r) => {
+    const saved = r[OVERLAY_POS_KEY] as { top: number; left: number } | undefined;
+    if (saved && overlayHost && typeof saved.top === 'number' && typeof saved.left === 'number') {
+      const { top, left } = clampOverlayPosition(saved.top, saved.left);
+      overlayHost.style.top = `${top}px`;
+      overlayHost.style.left = `${left}px`;
+    }
+  });
 
   const root = overlayHost.attachShadow({ mode: 'open' });
   root.innerHTML = `
@@ -170,6 +261,19 @@ function showOverlay(startedAt: number): void {
         box-shadow: 0 4px 16px rgba(0,0,0,0.10), 0 1px 3px rgba(0,0,0,0.06);
         user-select: none;
       }
+      /* Drag handle: everything in the bar except the Stop button.
+         cursor:grab while idle, cursor:grabbing while dragging.
+         The leading ⠿ glyph is a faint grip hint so users know it moves. */
+      .handle { display: inline-flex; align-items: center; gap: 10px; cursor: grab; touch-action: none; }
+      .handle:active { cursor: grabbing; }
+      .grip {
+        color: #9ca3af; font-size: 14px; line-height: 1; user-select: none;
+        margin-right: -2px; opacity: .55; transition: opacity .15s;
+      }
+      .handle:hover .grip { opacity: .9; color: #6b7280; }
+      .bar.dragging, .bar.dragging .handle { cursor: grabbing !important; }
+      .bar.dragging .grip { opacity: 1; color: #4b5563; }
+      .bar.dragging { box-shadow: 0 8px 28px rgba(0,0,0,0.18), 0 2px 6px rgba(0,0,0,0.10); }
       .logo { height: 18px; width: auto; flex-shrink: 0; }
       .dot {
         width: 8px; height: 8px; border-radius: 50%;
@@ -189,14 +293,34 @@ function showOverlay(startedAt: number): void {
         50%      { opacity: 0.4; transform: scale(1.5); }
       }
     </style>
-    <div class="bar" role="status" aria-live="polite">
-      <svg class="logo" xmlns="http://www.w3.org/2000/svg" viewBox="350 90 300 250"><path fill="#7c3aed" d="M546.778381,143.170624C571.837769,159.376846 596.645569,175.305298 621.322937,191.433304C636.009155,201.031509 635.978516,216.712524 621.371460,226.194397C576.110229,255.574753 530.847717,284.953583 485.503937,314.206238C472.276642,322.739563 459.865479,318.754028 453.794159,304.396240C425.790985,238.172882 397.800232,171.944290 369.830170,105.706955C369.077332,103.924194 367.954132,102.184967 368.359497,99.792320C371.491486,98.422760 374.856354,99.127960 378.098694,99.068153C385.426880,98.932976 392.763336,99.161888 400.087982,98.950737C403.767334,98.844666 405.815216,100.090027 407.237396,103.618439C417.878113,130.018570 428.701080,156.345245 439.462555,182.696701C444.289581,194.516510 449.106537,206.340408 454.767395,218.077042C454.767395,210.186707 454.769012,202.296356 454.767090,194.406006C454.761017,169.581909 454.815948,144.757568 454.710480,119.933884C454.677002,112.059120 456.822998,105.459862 464.040466,101.364922C471.543579,97.107903 478.433380,99.167374 485.133606,103.492462C505.562927,116.679909 526.023499,129.818924 546.778381,143.170624M487.077606,177.500229C487.088318,196.659058 487.097656,215.817871 487.110474,234.976700C487.115601,242.640198 486.990417,250.307053 487.176819,257.966248C487.361481,265.554352 493.136444,268.822632 499.920197,265.331207C501.841492,264.342316 503.688873,263.195923 505.509277,262.026917C523.025391,250.778488 540.529297,239.510925 558.034729,228.245773C561.167725,226.229553 564.291687,224.199097 568.479797,221.489456C565.252991,238.021347 557.077332,250.810303 549.042114,263.705475C555.025513,258.754944 560.207947,253.170654 564.589417,246.857254C574.476318,232.610870 581.915833,217.562714 579.724915,199.476318C578.750366,191.431412 575.671753,184.236603 570.779297,177.840118C572.674500,186.055344 575.610046,194.033020 574.522217,203.760239C570.794800,199.851517 568.074524,196.773041 564.520142,194.506149C556.095520,189.133087 547.900330,183.401398 539.506714,177.978363C526.497131,169.573074 513.505432,161.131058 500.296631,153.047012C493.184265,148.694077 487.352753,152.185699 487.141632,160.507706C487.006470,165.835632 487.099609,171.169327 487.077606,177.500229z"/><path fill="#ef4444" d="M516.001099,189.525391C527.921936,187.016037 537.708862,192.994354 540.377869,204.043137C543.029785,215.020767 537.080444,225.186371 526.369263,227.979706C515.840759,230.725403 505.525635,224.949127 502.393585,214.553787C499.126343,203.709702 504.189117,194.169617 516.001099,189.525391z"/></svg>
-      <span class="dot" aria-hidden="true"></span>
-      <span class="timer" id="oj-timer">0:00</span>
+    <div class="bar" id="oj-bar" role="status" aria-live="polite">
+      <div class="handle" id="oj-handle" title="Drag to move" aria-label="Drag to move recording bar">
+        <span class="grip" aria-hidden="true">⠿</span>
+        <svg class="logo" xmlns="http://www.w3.org/2000/svg" viewBox="350 90 300 250"><path fill="#7c3aed" d="M546.778381,143.170624C571.837769,159.376846 596.645569,175.305298 621.322937,191.433304C636.009155,201.031509 635.978516,216.712524 621.371460,226.194397C576.110229,255.574753 530.847717,284.953583 485.503937,314.206238C472.276642,322.739563 459.865479,318.754028 453.794159,304.396240C425.790985,238.172882 397.800232,171.944290 369.830170,105.706955C369.077332,103.924194 367.954132,102.184967 368.359497,99.792320C371.491486,98.422760 374.856354,99.127960 378.098694,99.068153C385.426880,98.932976 392.763336,99.161888 400.087982,98.950737C403.767334,98.844666 405.815216,100.090027 407.237396,103.618439C417.878113,130.018570 428.701080,156.345245 439.462555,182.696701C444.289581,194.516510 449.106537,206.340408 454.767395,218.077042C454.767395,210.186707 454.769012,202.296356 454.767090,194.406006C454.761017,169.581909 454.815948,144.757568 454.710480,119.933884C454.677002,112.059120 456.822998,105.459862 464.040466,101.364922C471.543579,97.107903 478.433380,99.167374 485.133606,103.492462C505.562927,116.679909 526.023499,129.818924 546.778381,143.170624M487.077606,177.500229C487.088318,196.659058 487.097656,215.817871 487.110474,234.976700C487.115601,242.640198 486.990417,250.307053 487.176819,257.966248C487.361481,265.554352 493.136444,268.822632 499.920197,265.331207C501.841492,264.342316 503.688873,263.195923 505.509277,262.026917C523.025391,250.778488 540.529297,239.510925 558.034729,228.245773C561.167725,226.229553 564.291687,224.199097 568.479797,221.489456C565.252991,238.021347 557.077332,250.810303 549.042114,263.705475C555.025513,258.754944 560.207947,253.170654 564.589417,246.857254C574.476318,232.610870 581.915833,217.562714 579.724915,199.476318C578.750366,191.431412 575.671753,184.236603 570.779297,177.840118C572.674500,186.055344 575.610046,194.033020 574.522217,203.760239C570.794800,199.851517 568.074524,196.773041 564.520142,194.506149C556.095520,189.133087 547.900330,183.401398 539.506714,177.978363C526.497131,169.573074 513.505432,161.131058 500.296631,153.047012C493.184265,148.694077 487.352753,152.185699 487.141632,160.507706C487.006470,165.835632 487.099609,171.169327 487.077606,177.500229z"/><path fill="#ef4444" d="M516.001099,189.525391C527.921936,187.016037 537.708862,192.994354 540.377869,204.043137C543.029785,215.020767 537.080444,225.186371 526.369263,227.979706C515.840759,230.725403 505.525635,224.949127 502.393585,214.553787C499.126343,203.709702 504.189117,194.169617 516.001099,189.525391z"/></svg>
+        <span class="dot" aria-hidden="true"></span>
+        <span class="timer" id="oj-timer">0:00</span>
+      </div>
       <button id="oj-stop">Stop</button>
     </div>
   `;
-  (document.documentElement || document.body).appendChild(overlayHost);
+  try {
+    const parent = document.body || document.documentElement;
+    if (!parent) {
+      // eslint-disable-next-line no-console
+      console.warn('[velocap/overlay] no document parent to append to; retrying in 100ms');
+      overlayHost = null;
+      setTimeout(() => showOverlay(startedAt), 100);
+      return;
+    }
+    parent.appendChild(overlayHost);
+    // eslint-disable-next-line no-console
+    console.info('[velocap/overlay] mounted to', parent.tagName);
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[velocap/overlay] appendChild failed:', e);
+    overlayHost = null;
+    return;
+  }
 
   overlayTimerEl = root.getElementById('oj-timer') as HTMLSpanElement;
   overlayStopBtn = root.getElementById('oj-stop') as HTMLButtonElement;
@@ -226,6 +350,61 @@ function showOverlay(startedAt: number): void {
         hideOverlay();
       });
   });
+
+  // Drag-to-move wiring. The handle covers the logo + dot + timer; the Stop
+  // button intentionally sits outside .handle so clicking Stop doesn't start
+  // a drag. Position is persisted to chrome.storage.local.
+  const handleEl = root.getElementById('oj-handle') as HTMLDivElement | null;
+  const barEl = root.getElementById('oj-bar') as HTMLDivElement | null;
+  if (handleEl && overlayHost) {
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let originTop = 0;
+    let originLeft = 0;
+    let dragging = false;
+    let movedPx = 0;
+
+    const onPointerMove = (e: PointerEvent) => {
+      if (!dragging || !overlayHost) return;
+      const dx = e.clientX - dragStartX;
+      const dy = e.clientY - dragStartY;
+      movedPx = Math.max(movedPx, Math.abs(dx) + Math.abs(dy));
+      const { top, left } = clampOverlayPosition(originTop + dy, originLeft + dx);
+      overlayHost.style.top = `${top}px`;
+      overlayHost.style.left = `${left}px`;
+    };
+    const onPointerUp = (_e: PointerEvent) => {
+      if (!dragging) return;
+      dragging = false;
+      barEl?.classList.remove('dragging');
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+      // Persist (only if the user actually moved — a click without drag
+      // shouldn't change the saved position).
+      if (movedPx > 2 && overlayHost) {
+        const top = parseInt(overlayHost.style.top, 10) || OVERLAY_DEFAULT_TOP;
+        const left = parseInt(overlayHost.style.left, 10) || 0;
+        void chrome.storage.local.set({ [OVERLAY_POS_KEY]: { top, left } });
+      }
+    };
+    handleEl.addEventListener('pointerdown', (e: PointerEvent) => {
+      if (!overlayHost) return;
+      // Only primary button.
+      if (e.button !== 0) return;
+      dragging = true;
+      movedPx = 0;
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
+      originTop = parseInt(overlayHost.style.top, 10) || 0;
+      originLeft = parseInt(overlayHost.style.left, 10) || 0;
+      barEl?.classList.add('dragging');
+      window.addEventListener('pointermove', onPointerMove);
+      window.addEventListener('pointerup', onPointerUp);
+      window.addEventListener('pointercancel', onPointerUp);
+      e.preventDefault();
+    });
+  }
 
   const tick = () => {
     if (overlayTimerEl) overlayTimerEl.textContent = fmtElapsed(Date.now() - overlayStartedAt);

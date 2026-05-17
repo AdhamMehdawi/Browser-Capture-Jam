@@ -87,6 +87,63 @@ const overlayTabIds = new Set<number>();
 
 // Storage key for persisting pending preview data (survives service worker restarts)
 const PENDING_PREVIEW_STORAGE_KEY = 'velocap.pendingPreview';
+// Storage key for persisting active recording state. MV3 service workers
+// can die during long recordings (e.g. when the recorded tab is refreshed
+// and Chrome decides nothing's holding the SW alive). Without persistence,
+// when the SW respawns it sees state = idle and the user loses the ability
+// to stop the recording — even though the offscreen recorder is still going.
+const RECORDING_STATE_KEY = 'velocap.recordingState';
+
+/** Persist active recording state to chrome.storage.local. */
+async function persistRecording(): Promise<void> {
+  if (state.kind !== 'recording') return;
+  await chrome.storage.local.set({
+    [RECORDING_STATE_KEY]: {
+      startedAt: state.startedAt,
+      workspaceId: state.workspaceId,
+      tabId: state.tabId,
+      windowId: state.windowId,
+      mode: state.mode,
+      startContext: state.startContext,
+      objectPath: state.objectPath,
+      uploadSasUrl: state.uploadSasUrl,
+      readSasUrl: state.readSasUrl,
+      savedAt: Date.now(),
+    },
+  });
+}
+
+/** Clear persisted recording state. */
+async function clearPersistedRecording(): Promise<void> {
+  await chrome.storage.local.remove(RECORDING_STATE_KEY).catch(() => undefined);
+}
+
+/** Restore active recording state on SW startup. Returns true if restored. */
+async function restoreRecording(): Promise<boolean> {
+  const r = await chrome.storage.local.get(RECORDING_STATE_KEY).catch(() => ({} as any));
+  const data = r[RECORDING_STATE_KEY];
+  if (!data || !data.objectPath) return false;
+  // Stale-guard: clear anything older than 2 hours. Beyond that, the offscreen
+  // doc is almost certainly gone and this is leftover junk.
+  if (Date.now() - (data.savedAt ?? 0) > 2 * 60 * 60 * 1000) {
+    await clearPersistedRecording();
+    return false;
+  }
+  state = {
+    kind: 'recording',
+    startedAt: data.startedAt,
+    workspaceId: data.workspaceId,
+    tabId: data.tabId,
+    windowId: data.windowId,
+    mode: data.mode,
+    startContext: data.startContext,
+    objectPath: data.objectPath,
+    uploadSasUrl: data.uploadSasUrl,
+    readSasUrl: data.readSasUrl,
+  };
+  console.log('[velocap/bg] restored recording state from storage', { tabId: data.tabId, startedAt: data.startedAt });
+  return true;
+}
 
 /** Persist pending-preview state to chrome.storage.local */
 async function persistPendingPreview(): Promise<void> {
@@ -150,8 +207,20 @@ async function clearPersistedPreview(): Promise<void> {
   console.log('[velocap/bg] cleared persisted pending preview');
 }
 
-// Restore state on service worker startup
-void restorePendingPreview();
+// Restore state on service worker startup. Recording state is checked first
+// so a SW restart during a live recording (e.g. when the user refreshes the
+// recorded tab) keeps the popup + overlay knowing that a recording is in
+// progress. Pending-preview restore covers the post-recording window where
+// the user hasn't decided to upload/discard yet.
+void (async () => {
+  const hadRecording = await restoreRecording();
+  if (hadRecording && state.kind === 'recording') {
+    // Re-show the overlay on the recording tab so the user gets the Stop
+    // button back. Best-effort: tab may have closed or navigated since.
+    void showOverlayOn(state.tabId, state.startedAt);
+  }
+  await restorePendingPreview();
+})();
 
 // First-run consent: open consent page on install or if consent version changed
 chrome.runtime.onInstalled.addListener(async (details) => {
@@ -641,6 +710,11 @@ async function handleRecordStart(req: RecordStartReq): Promise<BgResponse> {
       uploadSasUrl: upload.uploadSasUrl,
       readSasUrl: upload.readSasUrl,
     };
+    // Persist so the SW can be killed (e.g. while the user refreshes the
+    // recorded tab) and still know there's an active recording when it
+    // respawns — otherwise the popup shows the idle state and the user
+    // loses the ability to stop.
+    void persistRecording();
     console.log('[velocap/bg] state=recording');
     // Inject the floating recording bar on whatever tab the user was on —
     // for tab-mode that's the recorded tab itself; for full-screen it's just
@@ -650,6 +724,7 @@ async function handleRecordStart(req: RecordStartReq): Promise<BgResponse> {
   } catch (e) {
     await closeOffscreen().catch(() => undefined);
     state = { kind: 'idle' };
+    void clearPersistedRecording();
     const msg = e instanceof Error ? e.message : String(e);
     setError('record_start_failed', msg);
     return { ok: false, code: 'record_start_failed', message: msg };
@@ -682,6 +757,9 @@ async function handleRecordStop(): Promise<BgResponse> {
     readSasUrl: prev.readSasUrl,
   };
   pendingResult = null;
+  // Recording is no longer active — drop the persisted record so a SW
+  // restart during processing doesn't restore phantom "recording" state.
+  void clearPersistedRecording();
   // Fix Issue 7 (round 2): bound the offscreen `stop` message itself. If the
   // offscreen document was torn down by Chrome (memory pressure, tab
   // navigation), `sendMessage` to a non-existent listener can hang. Race it
@@ -716,6 +794,7 @@ async function handleRecordStop(): Promise<BgResponse> {
       resultWaiters.splice(idx, 1);
       console.warn('[velocap/bg] record-stop watchdog tripped after', watchdogMs, 'ms');
       state = { kind: 'idle' };
+    void clearPersistedRecording();
       void closeOffscreen().catch(() => undefined);
       void hideOverlayIfAny().catch(() => undefined);
       resolve({
@@ -743,6 +822,25 @@ async function onUploadCompleteFromOffscreen(msg: {
     note: msg.note,
   });
   try {
+    // Out-of-band stop path: Chrome's native "Stop sharing" bar fires the
+    // capture stream's `ended` event, which calls recorder.stop() directly.
+    // That arrives here as upload-complete while state is still `recording`
+    // — we never went through handleRecordStop's `processing` transition.
+    // Promote the recording → processing transition in-place so the preview
+    // tab still opens correctly.
+    if (state.kind === 'recording') {
+      console.log('[velocap/bg] upload-complete arrived in `recording` state — auto-promoting to `processing` (likely Chrome Stop Sharing button)');
+      const prev = state;
+      state = {
+        kind: 'processing',
+        workspaceId: prev.workspaceId,
+        startContext: prev.startContext,
+        objectPath: prev.objectPath,
+        uploadSasUrl: prev.uploadSasUrl,
+        readSasUrl: prev.readSasUrl,
+      };
+      pendingResult = null;
+    }
     if (state.kind !== 'processing') {
       console.warn('[velocap/bg] upload-complete delivered in state', state.kind);
       resolveResult({ ok: false, code: 'unexpected_state', message: 'Upload complete delivered out of band' });
@@ -877,6 +975,7 @@ async function onUploadCompleteFromOffscreen(msg: {
     });
   } catch (e) {
     state = { kind: 'idle' };
+    void clearPersistedRecording();
     await closeOffscreen();
     await hideOverlayIfAny();
     setError('recorded_handoff_failed', e instanceof Error ? e.message : String(e));
@@ -952,6 +1051,7 @@ async function uploadPendingPreview(req: { title?: string; annotatedDataUrl?: st
     });
 
     state = { kind: 'idle' };
+    void clearPersistedRecording();
     await clearPersistedPreview();
     void deleteIndexedDBBlob('pending-recording').catch(() => {});
     return { ok: true, id: result.id, url: result.url, ...(pending.note ? { note: pending.note } : {}) };
@@ -972,11 +1072,13 @@ function discardPendingPreview(): void {
   state = { kind: 'idle' };
   void deleteIndexedDBBlob('pending-recording').catch(() => {});
   void clearPersistedPreview();
+  void clearPersistedRecording();
 }
 
 function onRecorderError(message: string): void {
   resolveResult({ ok: false, code: 'recorder_error', message });
   state = { kind: 'idle' };
+  void clearPersistedRecording();
   void closeOffscreen();
   void hideOverlayIfAny();
 }

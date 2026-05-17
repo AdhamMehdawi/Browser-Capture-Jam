@@ -578,16 +578,17 @@ async function readRequestBody(init?: RequestInit | Request): Promise<string | u
 // JSON / text bodies for HAR exports. The content script (isolated world)
 // syncs the user's pref onto `document.documentElement.dataset.velocapBodies`
 // since page-hook can't read chrome.storage from MAIN world.
-const BODY_TEXTUAL = /^(application\/(json|x-www-form-urlencoded|ld\+json|problem\+json|xml)|text\/|application\/[a-z0-9.+-]+\+json)/i;
-const RESPONSE_BODY_CAP = 50_000; // 50 KB per response — keeps payloads sane
+const BODY_TEXTUAL = /^(application\/(json|x-www-form-urlencoded|ld\+json|problem\+json|xml|graphql)|text\/|application\/[a-z0-9.+-]+\+json)/i;
+const RESPONSE_BODY_CAP = 250_000; // 250 KB per response — covers most real-world API payloads
+const RESPONSE_BODY_HARD_SKIP = 5_000_000; // skip anything claiming > 5 MB
 
 function bodyCaptureEnabled(): boolean {
   try {
-    // Strict opt-in: only "on" enables. We INTENTIONALLY don't fall back
-    // to "true if unset" — otherwise a fresh page load before the content
-    // script has stamped the dataset would silently capture bodies for
-    // sites that may not tolerate it.
-    return document.documentElement.dataset.velocapBodies === 'on';
+    // Two channels: the content script sets BOTH. If a React app wipes the
+    // <html> dataset, the window global survives. Either truthy = on.
+    const ds = document.documentElement?.dataset?.velocapBodies === 'on';
+    const win = (window as unknown as { __velocapBodies?: boolean }).__velocapBodies === true;
+    return ds || win;
   } catch {
     return false;
   }
@@ -604,21 +605,41 @@ function summarizeResponse(res: Response): string | undefined {
  * Best-effort body read. Returns undefined if disabled, if the body is
  * binary/streaming/too-large, or if cloning fails. NEVER reads `res.body`
  * directly — always operates on a clone so the page's consumer is unaffected.
+ *
+ * Diagnostic logs use console.debug — surface in DevTools Console with the
+ * "Verbose" level filter so they don't spam normal console output.
  */
 async function safeReadResponseBody(res: Response): Promise<string | undefined> {
-  if (!bodyCaptureEnabled()) return undefined;
+  if (!bodyCaptureEnabled()) {
+    // eslint-disable-next-line no-console
+    console.debug('[velocap/hook] body read skipped: flag off', res.url);
+    return undefined;
+  }
   const ct = res.headers.get('content-type') || '';
-  if (!BODY_TEXTUAL.test(ct)) return undefined; // binary / unknown / streaming
-  // Skip very large responses to avoid memory blowups.
+  if (!BODY_TEXTUAL.test(ct)) {
+    // eslint-disable-next-line no-console
+    console.debug('[velocap/hook] body read skipped: non-textual content-type', ct, res.url);
+    return undefined;
+  }
+  // Skip absurdly large responses — but allow up to 5 MB to read since most
+  // chatty JSON APIs return 50-500 KB and we want those.
   const len = Number(res.headers.get('content-length') ?? 0);
-  if (len > 0 && len > RESPONSE_BODY_CAP * 4) return undefined;
+  if (len > 0 && len > RESPONSE_BODY_HARD_SKIP) {
+    // eslint-disable-next-line no-console
+    console.debug('[velocap/hook] body read skipped: too large', len, 'bytes', res.url);
+    return undefined;
+  }
   try {
     const text = await res.clone().text();
+    // eslint-disable-next-line no-console
+    console.debug('[velocap/hook] body captured:', text.length, 'chars', res.url);
     if (text.length > RESPONSE_BODY_CAP) {
       return text.slice(0, RESPONSE_BODY_CAP) + `…[truncated ${text.length - RESPONSE_BODY_CAP}]`;
     }
     return text;
-  } catch {
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.debug('[velocap/hook] body read failed:', e, res.url);
     return undefined;
   }
 }

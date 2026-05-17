@@ -28,11 +28,26 @@ console.info(
   'color:#ff4d7e;font-weight:bold',
 );
 
-// Feature #12 follow-up: surface the "capture response bodies" preference to
-// the MAIN-world page-hook via a document dataset attribute. Page-hook can't
-// read chrome.storage directly (different world). We sync the flag on load
-// AND on changes so toggling in the popup propagates without page reload.
+// Feature #12 follow-up: tell the MAIN-world page-hook whether response-body
+// capture is enabled. Two channels for resilience:
+//   1. document.documentElement.dataset.velocapBodies = 'on' / 'off'
+//      (works on most pages; can be wiped by React apps replacing <html>)
+//   2. Injected <script> that writes window.__velocapBodies = bool
+//      (survives DOM replacement; runs in MAIN world directly)
+// Page-hook checks both and uses whichever is truthy.
 (function pipeBodyCapturePref(): void {
+  const inject = (on: boolean) => {
+    // Inject a tiny <script> so the value lands in MAIN world's window.
+    // Removes itself after execution to keep the DOM clean.
+    try {
+      const s = document.createElement('script');
+      s.textContent = `window.__velocapBodies = ${on ? 'true' : 'false'};`;
+      (document.head || document.documentElement).appendChild(s);
+      s.remove();
+    } catch {
+      /* ignore — CSP may block script injection; dataset fallback still works */
+    }
+  };
   const setFlag = (on: boolean) => {
     const apply = () => {
       try {
@@ -42,10 +57,9 @@ console.info(
           return;
         }
         el.dataset.velocapBodies = on ? 'on' : 'off';
-        // Diagnostic log so we can see in console whether the flag landed
-        // and when. eslint-disable to allow the marker.
+        inject(on);
         // eslint-disable-next-line no-console
-        console.debug('[velocap/content] bodies flag =', on ? 'on' : 'off');
+        console.info('[velocap/content] bodies flag =', on ? 'on' : 'off', '(dataset + window.__velocapBodies set)');
       } catch {
         requestAnimationFrame(apply);
       }
@@ -523,8 +537,12 @@ function showPreview(_msg: {
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.kind === MSG.capture) {
-    sendResponse(collectPayload());
-    return true;
+    // Give in-flight body-capture updates a brief window to land before we
+    // snapshot the buffer — otherwise responses captured just before Stop
+    // might still be in `safeReadResponseBody().then(...)` and arrive too
+    // late. 250 ms is enough for typical .clone().text() reads.
+    setTimeout(() => sendResponse(collectPayload()), 250);
+    return true; // keep channel open for async response
   }
   if (msg?.kind === 'overlay:show') {
     showOverlay(msg.startedAt);
